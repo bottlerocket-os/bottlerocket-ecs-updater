@@ -1,0 +1,171 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Stack that provides the Bottlerocket ECS Updater'
+Parameters:
+  EcsClusterArn:
+    Description: 'The ARN of the cluster with Bottlerocket instances to manage'
+    Type: String
+  UpdaterImage:
+    Description: 'The container image that will run the Bottlerocket ECS Updater binary'
+    Type: String
+#  LambdaZipKey:
+#    Description: 'The key of the lambda zip file'
+#    Type: String
+#    Default: 'telemetry-data-processor.zip'
+#  TelemetryDataBucket:
+#    Description: 'Name of the telemetry data S3 bucket'
+#    Type: String
+#  TelemetryDataRegion:
+#    Description: 'The region where the telemetry data bucket and role were created'
+#    Type: String
+#  TelemetryDataRole:
+#    Description: 'The ARN of the role that allows access to the Bottlerocket telemetry data S3 bucket and cloudwatch:PutMetricData permissions'
+#    Type: String
+#  LambdaSNSSubscriptionEndpoint:
+#    Description: 'The SNS subscription endpoint for alarms based on Lambda execution'
+#    Type: String
+#  SNSSubscriptionProtocol:
+#    Type: String
+#    Default: email
+#    Description: 'The SNS subscription endpoint protocol. Default is email'
+
+Resources:
+  ExecutionRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - 'ecs-tasks.amazonaws.com'
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy'
+  TaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: 'Role allowing the Bottlerocket ECS Updater to manage Bottlerocket instances'
+      Path: !Sub '/${AWS::StackName}/'
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: 'ecs-tasks.amazonaws.com'
+            Action:
+              - 'sts:AssumeRole'
+      Policies:
+        - PolicyName: 'BottlerocketEcsUpdaterPolicy'
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              Effect: Allow
+              Action:
+                - 'ecs:ListTasks'
+                - 'ecs:ListContainerInstances'
+                - 'ecs:DescribeContainerInstances'
+              Resource: !Sub '${EcsClusterArn}'
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: '/ecs/bottlerocket-updater'
+  UpdaterTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    # Makes sure the log group is created before it is used.
+    DependsOn:
+    - ExecutionRole
+    - TaskRole
+    Properties:
+      # Name of the task definition. Subsequent versions of the task definition are grouped together under this name.
+      Family: 'bottlerocket-ecs-updater'
+      # awsvpc is required for Fargate
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      # 256 (.25 vCPU) - Available memory values: 0.5GB, 1GB, 2GB
+      # 512 (.5 vCPU) - Available memory values: 1GB, 2GB, 3GB, 4GB
+      # 1024 (1 vCPU) - Available memory values: 2GB, 3GB, 4GB, 5GB, 6GB, 7GB, 8GB
+      # 2048 (2 vCPU) - Available memory values: Between 4GB and 16GB in 1GB increments
+      # 4096 (4 vCPU) - Available memory values: Between 8GB and 30GB in 1GB increments
+      Cpu: 256
+      # 0.5GB, 1GB, 2GB - Available cpu values: 256 (.25 vCPU)
+      # 1GB, 2GB, 3GB, 4GB - Available cpu values: 512 (.5 vCPU)
+      # 2GB, 3GB, 4GB, 5GB, 6GB, 7GB, 8GB - Available cpu values: 1024 (1 vCPU)
+      # Between 4GB and 16GB in 1GB increments - Available cpu values: 2048 (2 vCPU)
+      # Between 8GB and 30GB in 1GB increments - Available cpu values: 4096 (4 vCPU)
+      Memory: 0.5GB
+      # A role needed by ECS.
+      # "The ARN of the task execution role that containers in this task can assume. All containers in this task are granted the permissions that are specified in this role."
+      # "There is an optional task execution IAM role that you can specify with Fargate to allow your Fargate tasks to make API calls to Amazon ECR."
+      ExecutionRoleArn: !Ref ExecutionRole
+      # "The Amazon Resource Name (ARN) of an AWS Identity and Access Management (IAM) role that grants containers in the task permission to call AWS APIs on your behalf."
+      TaskRoleArn: !Ref TaskRole
+      ContainerDefinitions:
+        - Name: BottlerocketEcsUpdaterService
+          Image: 554409873180.dkr.ecr.us-west-2.amazonaws.com/bottlerocket-ecs-updater:latest
+#          PortMappings:
+#            - ContainerPort: !Ref ContainerPort
+          # Send logs to CloudWatch Logs
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-region: !Ref AWS::Region
+              awslogs-group: !Ref LogGroup
+              awslogs-stream-prefix: ecs
+  Cron:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: "Check for Bottlerocket updates on a schedule"
+      Name: "bottlerocket-ecs-updater-cron"
+      ScheduleExpression: "cron(0/1 * * * ? *)"
+      State: 'ENABLED'
+      Targets:
+        - Id: stock-crawler-fargate-task
+          RoleArn: !GetAtt CronRole.Arn
+          Arn: !Ref EcsClusterArn
+          EcsParameters:
+            LaunchType: FARGATE
+            TaskCount: 1
+            TaskDefinitionArn: !Ref UpdaterTaskDefinition
+            NetworkConfiguration:
+              AwsVpcConfiguration:
+                AssignPublicIp: DISABLED
+                Subnets:
+                  - subnet-01492b964eca7ca88
+                  - subnet-0576d2356dafad370
+
+  CronRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service:
+                - "events.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      Path: /
+      Policies:
+        - PolicyDocument:
+            Statement:
+              - Effect: "Allow"
+                Condition:
+                  ArnEquals:
+                    ecs:cluster: !Ref EcsClusterArn
+                Action: "ecs:RunTask"
+                Resource: "*"
+              - Effect: "Allow"
+                Condition:
+                  ArnEquals:
+                    ecs:cluster: !Ref EcsClusterArn
+                Action:
+                  - "iam:ListInstanceProfiles"
+                  - "iam:ListRoles"
+                  - "iam:PassRole"
+                Resource: "*"
+          PolicyName: "BottlerocketEcsUpdaterSchedulerPolicy"

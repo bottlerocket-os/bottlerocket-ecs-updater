@@ -1,0 +1,95 @@
+#AWSTemplateFormatVersion: "2010-09-09"
+#Description: 'Resources used for integration testing of the Bottlerocket ECS Updater'
+#Parameters:
+#  LambdaAccountId:
+#    Description: 'The AWS Account ID for the account where the lambda that needs access lives'
+#    Type: String
+#  BucketName:
+#    Description: 'The name of the s3 bucket where metrics data will be stored (must be unique)'
+#    Type: String
+#Resources:
+#  BucketEncryptionKey:
+#    DeletionPolicy: Retain
+#    UpdateReplacePolicy: Retain
+#    Type: AWS::KMS::Key
+#    Properties:
+#      Description: 'Used for encrypting the metrics data S3 bucket'
+#      EnableKeyRotation: true
+#      KeyPolicy:
+#        Version: 2012-10-17
+#        Statement:
+#          - Sid: 'Enable IAM User Permissions'
+#            Effect: Allow
+#            Principal:
+#              AWS: !Join
+#                - ''
+#                - - 'arn:aws:iam::'
+#                  - !Ref 'AWS::AccountId'
+#                  - ':root'
+#            Action: 'kms:*'
+#            Resource: '*'
+#  TelemetryMetricsBucket:
+#    DeletionPolicy: Retain
+#    UpdateReplacePolicy: Retain
+#    Type: "AWS::S3::Bucket"
+#    Properties:
+#      BucketName: !Ref 'BucketName'
+#      BucketEncryption:
+#        ServerSideEncryptionConfiguration:
+#          - ServerSideEncryptionByDefault:
+#              KMSMasterKeyID: !GetAtt BucketEncryptionKey.Arn
+#              SSEAlgorithm: 'aws:kms'
+#  CrossAccountAccessRole:
+#    Type: AWS::IAM::Role
+#    Properties:
+#      Description: 'Role allowing access to the metrics S3 bucket and CloudWatch PutMetricData'
+#      Path: !Sub '/${AWS::StackName}/'
+#      AssumeRolePolicyDocument:
+#        Version: 2012-10-17
+#        Statement:
+#          - Effect: Allow
+#            Principal:
+#              AWS: !Sub '${LambdaAccountId}'
+#            Action:
+#              - 'sts:AssumeRole'
+#      Policies:
+#        - PolicyName: 'MetricsS3BucketAccess'
+#          PolicyDocument:
+#            Version: 2012-10-17
+#            Statement:
+#              Effect: Allow
+#              Action:
+#                - s3:GetObject
+#                - s3:PutObject
+#              Resource: !Join
+#                - ''
+#                - - 'arn:aws:s3:::'
+#                  - !Ref TelemetryMetricsBucket
+#                  - /*
+#        - PolicyName: 'MetricsS3BucketKeyAccess'
+#          PolicyDocument:
+#            Version: 2012-10-17
+#            Statement:
+#              Effect: Allow
+#              Action:
+#                - kms:Encrypt
+#                - kms:Decrypt
+#                - kms:ReEncrypt*
+#                - kms:GenerateDataKey*
+#                - kms:DescribeKey
+#              Resource: !GetAtt BucketEncryptionKey.Arn
+#        - PolicyName: 'CloudWatchPutMetricData'
+#          PolicyDocument:
+#            Version: 2012-10-17
+#            Statement:
+#              Effect: Allow
+#              Action:
+#                - cloudwatch:PutMetricData
+#              Resource: '*'
+#Outputs:
+#  BucketName:
+#    Value: !Ref 'TelemetryMetricsBucket'
+#    Description: Name of the S3 bucket intended for storing telemetry metrics data.
+#  Role:
+#    Description: 'The ARN of the cross-account access role'
+#    Value: !GetAtt CrossAccountAccessRole.Arn
