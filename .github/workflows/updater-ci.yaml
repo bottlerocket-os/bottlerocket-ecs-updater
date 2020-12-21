@@ -10,5 +10,5 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v1
-      - run: rustup update stable
+      - run: rustup update stable && cargo install -f cargo-deny
       - run: make ci
