@@ -1,11 +1,8 @@
-## My Project
+# Bottlerocket ECS Updater
 
-TODO: Fill this README out!
-
-Be sure to:
-
-* Change the title in this README
-* Edit your repository description on GitHub
+This project is a work-in-progress, currently unreleased.
+The purpose of this project is to provide a deployable system that will monitor and update Bottlerocket instances in an ECS cluster.
+See issue #1 for a description of the MVP design.
 
 ## Security
 
@@ -13,5 +10,5 @@ See [CONTRIBUTING](CONTRIBUTING.md#security-issue-notifications) for more inform
 
 ## License
 
-This project is licensed under the Apache-2.0 License.
+This project is dual licensed under either the Apache-2.0 License or the MIT license, your choice.
 
