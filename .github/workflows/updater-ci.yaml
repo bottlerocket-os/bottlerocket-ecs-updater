@@ -2,9 +2,8 @@ name: Updater CI
 on:
   pull_request:
     branches: [develop]
-  # TODO - remove fargate branch from this once CI is confirmed to work
   push:
-    branches: [fargate, develop]
+    branches: [develop]
 jobs:
   build:
     runs-on: ubuntu-latest
