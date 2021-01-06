@@ -611,13 +611,18 @@ name = "integ"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64 0.13.0",
  "env_logger",
  "log",
+ "rusoto_cloudformation",
  "rusoto_core",
+ "rusoto_credential",
+ "rusoto_ec2",
  "rusoto_ecs",
- "rusoto_sts",
  "structopt",
  "tokio",
+ "url",
+ "uuid",
 ]
 
 [[package]]
@@ -1057,6 +1062,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "rusoto_cloudformation"
+version = "0.45.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "17ebfee2a97a54fbf5ca8c8291ed336dbf723eb3fb2491c4daa5cb80407a0d3b"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "futures",
+ "rusoto_core",
+ "serde_urlencoded",
+ "xml-rs",
+]
+
+[[package]]
 name = "rusoto_core"
 version = "0.45.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1105,6 +1124,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "rusoto_ec2"
+version = "0.45.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5145366791ba9097d917330944ef460e1ebd67da871a8e04ad9f51cecc64375f"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "futures",
+ "rusoto_core",
+ "serde_urlencoded",
+ "xml-rs",
+]
+
+[[package]]
 name = "rusoto_ecs"
 version = "0.45.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1141,22 +1174,6 @@ dependencies = [
  "sha2",
  "time 0.2.23",
  "tokio",
-]
-
-[[package]]
-name = "rusoto_sts"
-version = "0.45.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3815b8c0fc1c50caf9e87603f23daadfedb18d854de287b361c69f68dc9d49e0"
-dependencies = [
- "async-trait",
- "bytes",
- "chrono",
- "futures",
- "rusoto_core",
- "serde_urlencoded",
- "tempfile",
- "xml-rs",
 ]
 
 [[package]]
@@ -1692,6 +1709,16 @@ dependencies = [
  "idna",
  "matches",
  "percent-encoding",
+]
+
+[[package]]
+name = "uuid"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9fde2f6a4bea1d6e007c4ad38c6839fa71cbb63b6dbf5b595aa38dc9b1093c11"
+dependencies = [
+ "rand",
+ "serde",
 ]
 
 [[package]]

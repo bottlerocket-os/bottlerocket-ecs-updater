@@ -7,7 +7,13 @@ use structopt::StructOpt;
 ///
 #[derive(StructOpt, Debug)]
 pub struct IntegArgs {
-    /// The name of the cluster, duh.
-    #[structopt(long, env = "BOTTLEROCKET_ECS_UPDATER_CLUSTER_NAME")]
-    pub cluster_name: String,
+    /// Complete ECR image name of `bottlerocket-ecs-updater`
+    #[structopt(long, env = "UPDATER_IMAGE")]
+    pub updater_image: String,
+    /// The Region in which cluster is running
+    #[structopt(long, env = "REGION")]
+    pub region: String,
+    /// The Bottlerocket AMI ID to test
+    #[structopt(long, env = "AMI_ID")]
+    pub ami_id: String,
 }

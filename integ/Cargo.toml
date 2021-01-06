@@ -8,10 +8,15 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 anyhow = "1"
+base64= ""
 env_logger = "0.8"
 log = "0.4"
 rusoto_core = "0.45"
+rusoto_credential = "0.45"
+rusoto_ec2 = "0.45"
 rusoto_ecs = "0.45"
-rusoto_sts = "0.45"
+rusoto_cloudformation = "0.45"
 structopt = "0.3"
 tokio = { version = "0.2", features = ["macros", "process"] }
+url = "2.1.0"
+uuid = { version = "0.8.1", features = ["serde", "v4"] }

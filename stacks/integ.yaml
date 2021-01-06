@@ -1,95 +1,104 @@
-#AWSTemplateFormatVersion: "2010-09-09"
-#Description: 'Resources used for integration testing of the Bottlerocket ECS Updater'
-#Parameters:
-#  LambdaAccountId:
-#    Description: 'The AWS Account ID for the account where the lambda that needs access lives'
-#    Type: String
-#  BucketName:
-#    Description: 'The name of the s3 bucket where metrics data will be stored (must be unique)'
-#    Type: String
-#Resources:
-#  BucketEncryptionKey:
-#    DeletionPolicy: Retain
-#    UpdateReplacePolicy: Retain
-#    Type: AWS::KMS::Key
-#    Properties:
-#      Description: 'Used for encrypting the metrics data S3 bucket'
-#      EnableKeyRotation: true
-#      KeyPolicy:
-#        Version: 2012-10-17
-#        Statement:
-#          - Sid: 'Enable IAM User Permissions'
-#            Effect: Allow
-#            Principal:
-#              AWS: !Join
-#                - ''
-#                - - 'arn:aws:iam::'
-#                  - !Ref 'AWS::AccountId'
-#                  - ':root'
-#            Action: 'kms:*'
-#            Resource: '*'
-#  TelemetryMetricsBucket:
-#    DeletionPolicy: Retain
-#    UpdateReplacePolicy: Retain
-#    Type: "AWS::S3::Bucket"
-#    Properties:
-#      BucketName: !Ref 'BucketName'
-#      BucketEncryption:
-#        ServerSideEncryptionConfiguration:
-#          - ServerSideEncryptionByDefault:
-#              KMSMasterKeyID: !GetAtt BucketEncryptionKey.Arn
-#              SSEAlgorithm: 'aws:kms'
-#  CrossAccountAccessRole:
-#    Type: AWS::IAM::Role
-#    Properties:
-#      Description: 'Role allowing access to the metrics S3 bucket and CloudWatch PutMetricData'
-#      Path: !Sub '/${AWS::StackName}/'
-#      AssumeRolePolicyDocument:
-#        Version: 2012-10-17
-#        Statement:
-#          - Effect: Allow
-#            Principal:
-#              AWS: !Sub '${LambdaAccountId}'
-#            Action:
-#              - 'sts:AssumeRole'
-#      Policies:
-#        - PolicyName: 'MetricsS3BucketAccess'
-#          PolicyDocument:
-#            Version: 2012-10-17
-#            Statement:
-#              Effect: Allow
-#              Action:
-#                - s3:GetObject
-#                - s3:PutObject
-#              Resource: !Join
-#                - ''
-#                - - 'arn:aws:s3:::'
-#                  - !Ref TelemetryMetricsBucket
-#                  - /*
-#        - PolicyName: 'MetricsS3BucketKeyAccess'
-#          PolicyDocument:
-#            Version: 2012-10-17
-#            Statement:
-#              Effect: Allow
-#              Action:
-#                - kms:Encrypt
-#                - kms:Decrypt
-#                - kms:ReEncrypt*
-#                - kms:GenerateDataKey*
-#                - kms:DescribeKey
-#              Resource: !GetAtt BucketEncryptionKey.Arn
-#        - PolicyName: 'CloudWatchPutMetricData'
-#          PolicyDocument:
-#            Version: 2012-10-17
-#            Statement:
-#              Effect: Allow
-#              Action:
-#                - cloudwatch:PutMetricData
-#              Resource: '*'
-#Outputs:
-#  BucketName:
-#    Value: !Ref 'TelemetryMetricsBucket'
-#    Description: Name of the S3 bucket intended for storing telemetry metrics data.
-#  Role:
-#    Description: 'The ARN of the cross-account access role'
-#    Value: !GetAtt CrossAccountAccessRole.Arn
+Description: ECS Updater integration test stack
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      CidrBlock: 10.0.0.0/16
+      Tags:
+        - Key: Name
+          Value: ECSUpdaterInteg
+  Subnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      # FIXME: Find out correct value
+      CidrBlock: 10.0.30.0/20
+      AvailabilityZone:
+        Fn::Select:
+          - 0
+          - Fn::GetAZs: ""
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: ECSUpdaterIntegSubnet1
+  Subnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      # FIXME: Find out correct value
+      CidrBlock: 10.0.50.0/20
+      AvailabilityZone:
+        Fn::Select:
+          - 1
+          - Fn::GetAZs: ""
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: ECSUpdaterIntegSubnet2
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security Group for Ecs Updater Task
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: ECSUpdaterInteg
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: ECSUpdaterInteg
+  GatewayAttachement:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+  RouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: ECSUpdaterInteg
+  DefaultRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref RouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+  PublicSubnetOneRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref Subnet1
+      RouteTableId: !Ref RouteTable
+  PublicSubnetTwoRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref Subnet2
+      RouteTableId: !Ref RouteTable
+  EcsInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: 'Role for cluster instances'
+      Path: !Sub '/${AWS::StackName}/'
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: 'ec2.amazonaws.com'
+            Action:
+              - 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role'
+        - 'arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore'
+  EcsInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: !Ref EcsInstanceRole
+      Path: !Sub '/${AWS::StackName}/'
+      Roles:
+        - !Ref EcsInstanceRole
