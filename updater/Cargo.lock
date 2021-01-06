@@ -124,6 +124,7 @@ dependencies = [
  "rusoto_core",
  "rusoto_credential",
  "rusoto_ecs",
+ "rusoto_ssm",
  "rusoto_sts",
  "structopt",
  "tokio",
@@ -1120,6 +1121,20 @@ dependencies = [
  "sha2",
  "time 0.2.23",
  "tokio",
+]
+
+[[package]]
+name = "rusoto_ssm"
+version = "0.45.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8e4950a5600f4aab2eeb1f525d7843acbfbc7a720275d26c2afcddbb112ffd17"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "futures",
+ "rusoto_core",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

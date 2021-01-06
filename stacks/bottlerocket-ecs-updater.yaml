@@ -7,6 +7,12 @@ Parameters:
   UpdaterImage:
     Description: 'The container image that will run the Bottlerocket ECS Updater binary'
     Type: String
+  EcsClusterVPCSubnet1:
+    Description: 'VPC subnet ID in which the cluster is running'
+    Type: String
+  EcsClusterVPCSubnet2:
+    Description: 'VPC subnet ID in which the cluster is running'
+    Type: String
 #  LambdaZipKey:
 #    Description: 'The key of the lambda zip file'
 #    Type: String
@@ -41,7 +47,7 @@ Resources:
                 - 'ecs-tasks.amazonaws.com'
             Action:
               - 'sts:AssumeRole'
-      Path: /
+      Path: !Sub /${AWS::StackName}/
       ManagedPolicyArns:
         - 'arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy'
   TaskRole:
@@ -67,11 +73,19 @@ Resources:
                 - 'ecs:ListTasks'
                 - 'ecs:ListContainerInstances'
                 - 'ecs:DescribeContainerInstances'
-              Resource: !Sub '${EcsClusterArn}'
+                - 'ssm:SendCommand'
+                - 'ssm:GetCommandInvocation'
+              Resource:
+                - !Sub '${EcsClusterArn}'
+                - !Sub "arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:container-instance/*"
+                - !Sub "arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:instance/*"
+                - !Sub "arn:aws:ssm:${AWS::Region}::document/AWS-RunShellScript"
+                - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:*"
   LogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: '/ecs/bottlerocket-updater'
+      LogGroupName: !Sub '/ecs/bottlerocket-updater-${AWS::StackName}'
+      RetentionInDays: 30
   UpdaterTaskDefinition:
     Type: AWS::ECS::TaskDefinition
     # Makes sure the log group is created before it is used.
@@ -100,14 +114,22 @@ Resources:
       # A role needed by ECS.
       # "The ARN of the task execution role that containers in this task can assume. All containers in this task are granted the permissions that are specified in this role."
       # "There is an optional task execution IAM role that you can specify with Fargate to allow your Fargate tasks to make API calls to Amazon ECR."
-      ExecutionRoleArn: !Ref ExecutionRole
+      ExecutionRoleArn: !GetAtt ExecutionRole.Arn
       # "The Amazon Resource Name (ARN) of an AWS Identity and Access Management (IAM) role that grants containers in the task permission to call AWS APIs on your behalf."
-      TaskRoleArn: !Ref TaskRole
+      TaskRoleArn: !GetAtt TaskRole.Arn
       ContainerDefinitions:
         - Name: BottlerocketEcsUpdaterService
-          Image: 554409873180.dkr.ecr.us-west-2.amazonaws.com/bottlerocket-ecs-updater:latest
+          # Image which runs the updater application
+          # TODO: replace with permanent ECR public location later
+          Image: !Ref UpdaterImage
 #          PortMappings:
 #            - ContainerPort: !Ref ContainerPort
+          EntryPoint:
+            - /ecs-updater/bin/bottlerocket-ecs-updater
+            - --cluster-arn
+            - !Ref EcsClusterArn
+            - --region
+            - !Ref AWS::Region
           # Send logs to CloudWatch Logs
           LogConfiguration:
             LogDriver: awslogs
@@ -119,8 +141,10 @@ Resources:
     Type: AWS::Events::Rule
     Properties:
       Description: "Check for Bottlerocket updates on a schedule"
-      Name: "bottlerocket-ecs-updater-cron"
-      ScheduleExpression: "cron(0/1 * * * ? *)"
+      Name: !Sub "${AWS::StackName}-cron"
+      # Run Task every 5 minutes
+      # FIXME: Find out the Default value
+      ScheduleExpression: "cron(0/5 * * * ? *)"
       State: 'ENABLED'
       Targets:
         - Id: stock-crawler-fargate-task
@@ -132,11 +156,12 @@ Resources:
             TaskDefinitionArn: !Ref UpdaterTaskDefinition
             NetworkConfiguration:
               AwsVpcConfiguration:
-                AssignPublicIp: DISABLED
+                # Requires `ENABLED` public subnet and ` DISABLED` for private subnet.
+                # FIXME: Find out the correct value
+                AssignPublicIp: ENABLED
                 Subnets:
-                  - subnet-01492b964eca7ca88
-                  - subnet-0576d2356dafad370
-
+                  - !Ref EcsClusterVPCSubnet1
+                  - !Ref EcsClusterVPCSubnet2
   CronRole:
     Type: AWS::IAM::Role
     Properties:

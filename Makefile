@@ -1,6 +1,8 @@
+UPDATER_IMAGE=bottlerocket-update-operator:latest
+
 .PHONY: image
 image: ## builds the updater docker image
-	docker build -t bottlerocket-update-operator:latest "${PWD}/updater"
+	docker build -t ${UPDATER_IMAGE} "${PWD}/updater"
 
 .PHONY: ci
 ci: ci-checks image ## the checks that we run for pull requests.

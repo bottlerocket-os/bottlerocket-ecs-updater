@@ -13,4 +13,7 @@ pub struct Args {
     /// The ARN of the cluster in which we will manage Bottlerocket instances.
     #[structopt(long, env = "BOTTLEROCKET_ECS_UPDATER_CLUSTER_ARN")]
     pub cluster_arn: String,
+    /// The Region in which cluster is running
+    #[structopt(long, env = "REGION")]
+    pub region: String,
 }
