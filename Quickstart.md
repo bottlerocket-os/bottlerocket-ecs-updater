@@ -17,7 +17,7 @@ aws ecr create-repository --repo bottlerocket-ecs-updater
 Declare an AWS Account Id in which to upload image
 
 ```
-AWSAccountId=062205370538
+AWSAccountId=123456789
 ```
 
 Declare a variable to tag image
@@ -51,7 +51,7 @@ Deploy Cloudformation stack to start a cron job that runs the Updater image in a
 
 ```
 # ARN of ECS Cluster that needs auto updates
-EcsClusterArn=aws:ecs:us-west-2:062205370538:cluster/bottlerocket-ecs
+EcsClusterArn=aws:ecs:us-west-2:123456789:cluster/bottlerocket-ecs
 
 # ECS Cluster VPC Subnets
 Subnet1=subnet-a3dfr

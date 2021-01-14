@@ -19,12 +19,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "anyhow"
-version = "1.0.35"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2c0df63cb2955042487fad3aefd2c6e3ae7389ac5dc1beb28921de0b69f779d4"
-
-[[package]]
 name = "arrayref"
 version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -118,14 +112,17 @@ dependencies = [
 name = "bottlerocket-ecs-updater"
 version = "0.1.0"
 dependencies = [
- "anyhow",
+ "async-trait",
  "env_logger",
  "log",
+ "mock-it",
  "rusoto_core",
  "rusoto_credential",
  "rusoto_ecs",
+ "rusoto_signature",
  "rusoto_ssm",
  "rusoto_sts",
+ "snafu",
  "structopt",
  "tokio",
 ]
@@ -297,6 +294,12 @@ name = "discard"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "212d0f5754cb6769937f4501cc0e67f4f4483c8d2c3e1e922ee9edbe4ab4c7c0"
+
+[[package]]
+name = "doc-comment"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fea41bba32d969b513997752735605054bc0dfa92b4c56bf1189f2e174be7a10"
 
 [[package]]
 name = "dtoa"
@@ -763,6 +766,12 @@ dependencies = [
  "socket2",
  "winapi 0.3.9",
 ]
+
+[[package]]
+name = "mock-it"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "144d3ace3cdaceb5f23891de7aae00af4660f22aed70c25825d549816ee9ef77"
 
 [[package]]
 name = "net2"
@@ -1345,6 +1354,27 @@ name = "slab"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c111b5bd5695e56cffe5129854aa230b39c93a305372fdbb2668ca2394eea9f8"
+
+[[package]]
+name = "snafu"
+version = "0.6.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eab12d3c261b2308b0d80c26fffb58d17eba81a4be97890101f416b478c79ca7"
+dependencies = [
+ "doc-comment",
+ "snafu-derive",
+]
+
+[[package]]
+name = "snafu-derive"
+version = "0.6.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1508efa03c362e23817f96cde18abed596a25219a8b2c66e8db33c03543d315b"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
 
 [[package]]
 name = "socket2"

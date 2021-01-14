@@ -89,7 +89,7 @@ async fn main() {
         }
     }
 
-    println!("creating cluster {} to run test", cluster_name);
+    println!("creating cluster {} to run tests", cluster_name);
     let create_cluster_result = create_cluster(ecs_client, cluster_name.to_string()).await;
     let cluster_arn = create_cluster_result
         .cluster
@@ -97,7 +97,7 @@ async fn main() {
     println!("cluster {} created", cluster_name);
 
     println!(
-        "describing {} stack resources to get subnets' and security group id",
+        "describing {} stack resources to get subnet and security group id",
         integ_stack_name
     );
     let integ_stack_resources =
