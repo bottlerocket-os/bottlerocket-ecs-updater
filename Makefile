@@ -21,3 +21,8 @@ image: fetch-sdk
 .PHONY: fetch-sdk
 fetch-sdk: # fetches and loads the image we use to build the updater docker image
 	scripts/load-bottlerocket-sdk.sh --site ${BOTTLEROCKET_SDK_SITE} --image ${BUILDER_IMAGE}
+
+.PHONY: check-licenses
+check-licenses:
+	cd updater && cargo deny check licenses
+	cd integ && cargo deny check licenses
