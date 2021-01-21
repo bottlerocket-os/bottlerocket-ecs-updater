@@ -1,22 +1,26 @@
 [package]
 name = "integ"
 version = "0.1.0"
-authors = ["Matt Briggs <brigmatt@amazon.com>"]
+authors = ["Shailesh Gothi <gothisg@amazon.com>"]
 edition = "2018"
 publish = false
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-anyhow = "1"
-base64= ""
+async-trait = "0.1.42"
+base64 = "0.13.0"
 env_logger = "0.8"
 log = "0.4"
+rusoto_cloudformation = "0.45"
 rusoto_core = "0.45"
 rusoto_credential = "0.45"
 rusoto_ec2 = "0.45"
 rusoto_ecs = "0.45"
-rusoto_cloudformation = "0.45"
+rusoto_signature = "0.45.0"
+simplelog = "0.9"
+snafu = "0.6.10"
 structopt = "0.3"
 tokio = { version = "0.2", features = ["macros", "process"] }
 url = "2.1.0"
 uuid = { version = "0.8.1", features = ["serde", "v4"] }
+

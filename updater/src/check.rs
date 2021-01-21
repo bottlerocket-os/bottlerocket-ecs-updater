@@ -1,38 +1,46 @@
 use crate::args::Args;
 use crate::aws::api::Mediator;
 use crate::error;
+use log::{debug, info};
 use snafu::ResultExt;
 use std::collections::HashMap;
 use std::{thread, time};
 
 pub async fn check_updates(args: &Args, aws_api: Box<dyn Mediator>) -> error::Result<()> {
+    info!(
+        "Requesting list of container instances for cluster: {}",
+        &args.cluster_name
+    );
     let list = aws_api
-        .list_container_instances(args.cluster_arn.clone())
+        .list_container_instances(args.cluster_name.clone())
         .await
         .context(error::ListContainerInstances)?;
-    dbg!(list.clone());
+    debug!("List of container instances: {:?}", &list);
 
-    // we need ec2 instance id to send ssm command.
+    info!("Requesting list of ec2 instances ids for cluster container instances");
     let instance_details = aws_api
-        .describe_container_instances(args.cluster_arn.clone(), &list.container_instance_arns)
+        .describe_container_instances(args.cluster_name.clone(), &list.container_instance_arns)
         .await
         .context(error::DescribeContainerInstances)?;
-    dbg!(instance_details.clone());
+    debug!("List of instance ids: {:?}", &instance_details);
 
-    // send ssm command to check for updates
     let params = check_updates_param();
     // TODO: retry on failure
+    info!("Send ssm command to check for updates");
+    // debug!("Sending ssm command to check updates on instances: {:?}",);
     let ssm_command_details = aws_api
         .send_command(&instance_details.instance_ids, params.to_owned(), Some(120))
         .await
         .context(error::CheckUpdates)?;
-    dbg!(ssm_command_details.clone());
-    // FIXME : find better way to wait and also retry if command in progress
-    thread::sleep(time::Duration::from_secs(5));
-    // for each instance check ssm command output
-    for instance_id in instance_details.instance_ids {
+    debug!("ssm command id: {}", &ssm_command_details.command_id);
+
+    thread::sleep(time::Duration::from_millis(2000));
+    info!("Get ssm send command result");
+    // TODO - eliminate hosts not running Bottlerocket
+    // TODO - eliminate hosts that have non-service tasks
+    loop {
         let result = aws_api
-            .get_command_invocation(ssm_command_details.command_id.clone(), instance_id.clone())
+            .list_command_invocation(ssm_command_details.command_id.clone())
             .await
             .context(error::GetCommandOutput)?;
         dbg!(result);

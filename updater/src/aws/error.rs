@@ -27,24 +27,22 @@ pub enum Error {
         field: &'static str,
     },
 
-    // The application failed to get ssm command invocation result
-    #[snafu(display(
-        "Failed to get ssm command `{}` invocation result for instance {}: {}",
-        command_id,
-        instance_id,
-        source
-    ))]
-    GetCommandInvocation {
-        command_id: String,
-        instance_id: String,
-        source: rusoto_core::RusotoError<rusoto_ssm::GetCommandInvocationError>,
-        backtrace: Backtrace,
-    },
-
     // The application failed to create HttpClient
     #[snafu(display("Failed to create HTTP client: {}", source))]
     HttpClient {
         source: rusoto_core::request::TlsError,
+        backtrace: Backtrace,
+    },
+
+    // The application failed to get ssm command invocation result
+    #[snafu(display(
+        "Failed to get ssm command `{}` invocation result: {}",
+        command_id,
+        source
+    ))]
+    ListCommandInvocations {
+        command_id: String,
+        source: rusoto_core::RusotoError<rusoto_ssm::ListCommandInvocationsError>,
         backtrace: Backtrace,
     },
 
@@ -79,6 +77,19 @@ pub enum Error {
     SendSSMCommand {
         source: rusoto_core::RusotoError<rusoto_ssm::SendCommandError>,
         backtrace: Backtrace,
+    },
+
+    // The application failed because of missing field in response
+    #[snafu(display(
+        "Missing field in `{}` response for instance {}: {}",
+        api,
+        instance_id,
+        field
+    ))]
+    SSMInvocationMissingField {
+        instance_id: String,
+        api: &'static str,
+        field: &'static str,
     },
 
     // The application failed because of missing field in response

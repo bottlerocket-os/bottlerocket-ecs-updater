@@ -13,27 +13,6 @@ Parameters:
   EcsClusterVPCSubnet2:
     Description: 'VPC subnet ID in which the cluster is running'
     Type: String
-#  LambdaZipKey:
-#    Description: 'The key of the lambda zip file'
-#    Type: String
-#    Default: 'telemetry-data-processor.zip'
-#  TelemetryDataBucket:
-#    Description: 'Name of the telemetry data S3 bucket'
-#    Type: String
-#  TelemetryDataRegion:
-#    Description: 'The region where the telemetry data bucket and role were created'
-#    Type: String
-#  TelemetryDataRole:
-#    Description: 'The ARN of the role that allows access to the Bottlerocket telemetry data S3 bucket and cloudwatch:PutMetricData permissions'
-#    Type: String
-#  LambdaSNSSubscriptionEndpoint:
-#    Description: 'The SNS subscription endpoint for alarms based on Lambda execution'
-#    Type: String
-#  SNSSubscriptionProtocol:
-#    Type: String
-#    Default: email
-#    Description: 'The SNS subscription endpoint protocol. Default is email'
-
 Resources:
   ExecutionRole:
     Type: 'AWS::IAM::Role'

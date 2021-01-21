@@ -1,3 +1,4 @@
+use simplelog::LevelFilter;
 use structopt::StructOpt;
 
 /// Bottlerocket ECS Updater
@@ -10,10 +11,13 @@ use structopt::StructOpt;
 ///
 #[derive(StructOpt, Debug)]
 pub struct Args {
+    /// How much detail to log; from least to most: ERROR, WARN, INFO, DEBUG, TRACE
+    #[structopt(long, env = "LOG_LEVEL")]
+    pub log_level: LevelFilter,
     /// The ARN of the cluster in which we will manage Bottlerocket instances.
     #[structopt(long, env = "BOTTLEROCKET_ECS_UPDATER_CLUSTER_ARN")]
-    pub cluster_arn: String,
+    pub cluster_name: String,
     /// The AWS Region in which cluster is running
-    #[structopt(long, env = "REGION")]
+    #[structopt(long, env = "BOTTLEROCKET_ECS_REGION")]
     pub region: String,
 }

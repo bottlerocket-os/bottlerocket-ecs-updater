@@ -52,6 +52,10 @@ pub enum Error {
         backtrace: Backtrace,
     },
 
+    // The application failed to setup Logger
+    #[snafu(display("Logger setup error: {}", source))]
+    Logger { source: log::SetLoggerError },
+
     // The application failed to create SSM client
     #[snafu(display("Failed to create SSM client: {}", source))]
     SsmClient { source: crate::aws::error::Error },

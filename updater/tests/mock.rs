@@ -68,7 +68,7 @@ impl Mediator for AwsMediatorMock {
         }
     }
 
-    async fn get_command_invocation(
+    async fn list_command_invocation(
         &self,
         command_id: String,
         instance_id: String,
