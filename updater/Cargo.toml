@@ -1,0 +1,18 @@
+[package]
+name = "bottlerocket-ecs-updater"
+version = "0.1.0"
+authors = ["Shailesh Gothi <gothisg@amazon.com>", "Matt Briggs <brigmatt@amazon.com>"]
+edition = "2018"
+publish = false
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+anyhow = "1"
+env_logger = "0.8"
+log = "0.4"
+rusoto_core = { version = "0.46", default-features = false, features = [ "rustls" ] }
+rusoto_credential = "0.46"
+rusoto_ecs = { version = "0.46", default-features = false, features = [ "rustls" ] }
+rusoto_sts = { version = "0.46", default-features = false, features = [ "rustls" ] }
+structopt = "0.3"
+tokio = { version = "1", features = ["macros", "process"] }
