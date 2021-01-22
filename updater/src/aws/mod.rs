@@ -9,7 +9,7 @@ use std::str::FromStr;
 
 pub mod api;
 pub(crate) mod client;
-pub(crate) mod error;
+pub mod error;
 
 /// Builds a Region from the given region name, and uses the custom endpoint from the AWS config,
 /// if specified in aws.region.REGION.endpoint.

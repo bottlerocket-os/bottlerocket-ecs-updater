@@ -2,6 +2,7 @@
 
 #![allow(clippy::default_trait_access)]
 
+use crate::aws;
 use snafu::{Backtrace, Snafu};
 /// Alias for `Result<T, Error>`.
 pub type Result<T> = std::result::Result<T, Error>;
@@ -15,14 +16,14 @@ pub enum Error {
     // The application failed to send ssm command to check updates
     #[snafu(display("Failed to send ssm command to check updates: {}", source))]
     CheckUpdates {
-        source: Box<dyn std::error::Error + Send + Sync + 'static>,
+        source: aws::error::Error,
         backtrace: Backtrace,
     },
 
     // The application failed to describe container instances
     #[snafu(display("Failed to describe container instances: {}", source))]
     DescribeContainerInstances {
-        source: Box<dyn std::error::Error + Send + Sync + 'static>,
+        source: aws::error::Error,
         backtrace: Backtrace,
     },
 
@@ -37,7 +38,7 @@ pub enum Error {
     // The application failed to get ssm command output
     #[snafu(display("Failed to get ssm command output: {}", source))]
     GetCommandOutput {
-        source: Box<dyn std::error::Error + Send + Sync + 'static>,
+        source: aws::error::Error,
         backtrace: Backtrace,
     },
 
@@ -48,7 +49,7 @@ pub enum Error {
     // The application failed to list container instances from cluster
     #[snafu(display("Failed to list container instances: {}", source))]
     ListContainerInstances {
-        source: Box<dyn std::error::Error + Send + Sync + 'static>,
+        source: aws::error::Error,
         backtrace: Backtrace,
     },
 

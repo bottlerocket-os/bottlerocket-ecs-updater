@@ -38,28 +38,25 @@ pub trait Mediator {
     async fn list_container_instances(
         &self,
         cluster_arn: String,
-    ) -> std::result::Result<ContainerInstances, Box<dyn std::error::Error + Send + Sync + 'static>>;
+    ) -> error::Result<ContainerInstances>;
     /// Describes each container instances and extracts their ec2 instance id
     async fn describe_container_instances(
         &self,
         cluster_arn: String,
         container_instance_arns: &[String],
-    ) -> std::result::Result<Instances, Box<dyn std::error::Error + Send + Sync + 'static>>;
+    ) -> error::Result<Instances>;
     /// Runs ssm document on the list of instances provided.
     async fn send_command(
         &self,
         instance_ids: &[String],
         params: HashMap<String, Vec<String>>,
         timeout: Option<i64>,
-    ) -> std::result::Result<SSMCommandResponse, Box<dyn std::error::Error + Send + Sync + 'static>>;
+    ) -> error::Result<SSMCommandResponse>;
     /// Gets the ssm command result for each instance
-    async fn list_command_invocation(
+    async fn list_command_invocations(
         &self,
         command_id: String,
-    ) -> std::result::Result<
-        Vec<SSMInvocationResult>,
-        Box<dyn std::error::Error + Send + Sync + 'static>,
-    >;
+    ) -> error::Result<Vec<SSMInvocationResult>>;
 }
 
 pub struct AwsMediator {
@@ -82,8 +79,7 @@ impl Mediator for AwsMediator {
     async fn list_container_instances(
         &self,
         cluster_arn: String,
-    ) -> std::result::Result<ContainerInstances, Box<dyn std::error::Error + Send + Sync + 'static>>
-    {
+    ) -> error::Result<ContainerInstances> {
         let resp = self
             .ecs_client
             .list_container_instances(ListContainerInstancesRequest {
@@ -109,7 +105,7 @@ impl Mediator for AwsMediator {
         &self,
         cluster_arn: String,
         container_instance_arns: &[String],
-    ) -> std::result::Result<Instances, Box<dyn std::error::Error + Send + Sync + 'static>> {
+    ) -> error::Result<Instances> {
         let resp = self
             .ecs_client
             .describe_container_instances(DescribeContainerInstancesRequest {
@@ -144,8 +140,7 @@ impl Mediator for AwsMediator {
         instance_ids: &[String],
         params: HashMap<String, Vec<String>>,
         timeout: Option<i64>,
-    ) -> std::result::Result<SSMCommandResponse, Box<dyn std::error::Error + Send + Sync + 'static>>
-    {
+    ) -> error::Result<SSMCommandResponse> {
         let resp = self
             .ssm_client
             .send_command(SendCommandRequest {
@@ -178,13 +173,10 @@ impl Mediator for AwsMediator {
         })
     }
 
-    async fn list_command_invocation(
+    async fn list_command_invocations(
         &self,
         command_id: String,
-    ) -> std::result::Result<
-        Vec<SSMInvocationResult>,
-        Box<dyn std::error::Error + Send + Sync + 'static>,
-    > {
+    ) -> error::Result<Vec<SSMInvocationResult>> {
         let resp = self
             .ssm_client
             .list_command_invocations(ListCommandInvocationsRequest {

@@ -6,7 +6,6 @@ use bottlerocket_ecs_updater::aws::api::{
 use bottlerocket_ecs_updater::check::check_updates;
 use mock::AwsMediatorMock;
 use std::collections::HashMap;
-use simplelog::LevelFilter;
 
 #[tokio::test]
 async fn sample_test() {
@@ -38,20 +37,18 @@ async fn sample_test() {
             command_id: command_id.to_string(),
         }));
     mediator_mock
-        .list_command_invocations
-        .given((command_id.to_string())
-        .will_return(Ok(vec![SSMInvocationResult {
-            instance_id: "".to_string(),
+        .get_command_invocation
+        .given((command_id.to_string(), instance_1.to_string()))
+        .will_return(Ok(SSMInvocationResult {
             output: "Some command output".to_string(),
             status: "Some command status".to_string(),
             status_details: "Some command details".to_string(),
             response_code: 0,
-        }]));
+        }));
     async {
         let args = Args {
-            log_level: LevelFilter::Off,
+            cluster_arn: cluster_arn.to_string(),
             region: test_region.to_string(),
-            cluster_name: "".to_string()
         };
         let aws_mediator_mock = Box::new(mediator_mock.clone());
         let result = check_updates(&args, aws_mediator_mock).await.unwrap();

@@ -1,25 +1,21 @@
-use async_trait::async_trait;
-use bottlerocket_ecs_updater::aws;
-use bottlerocket_ecs_updater::aws::api::{
+use crate::aws::api::{
     ContainerInstances, Instances, Mediator, SSMCommandResponse, SSMInvocationResult,
 };
+use async_trait::async_trait;
 use mock_it::Mock;
 use snafu::{ResultExt, Snafu};
 use std::collections::HashMap;
 use std::result::Result;
-use rusoto_core::RusotoError;
 
 #[derive(Clone)]
 pub struct AwsMediatorMock {
-    pub list_container_instances: Mock<String, aws::error::Result<ContainerInstances>,
-    pub describe_container_instances:
-        Mock<(String, Vec<String>), aws::error::Result<Instances>,
+    pub list_container_instances: Mock<String, Result<ContainerInstances, String>>,
+    pub describe_container_instances: Mock<(String, Vec<String>), Result<Instances, String>>,
     pub send_command: Mock<
         (Vec<String>, HashMap<String, Vec<String>>, Option<i64>),
-        aws::error::Result<SSMCommandResponse>,
+        Result<SSMCommandResponse, String>,
     >,
-    pub list_command_invocations:
-        Mock<(String), aws::error::Result<Vec<SSMInvocationResult>>,
+    pub get_command_invocation: Mock<(String, String), Result<SSMInvocationResult, String>>,
 }
 
 #[async_trait]
@@ -27,32 +23,32 @@ impl Mediator for AwsMediatorMock {
     async fn list_container_instances(
         &self,
         cluster_arn: String,
-    ) -> aws::error::Result<ContainerInstances> {
-        self
+    ) -> Result<ContainerInstances, crate::aws::error::Error> {
+        let result = self
             .list_container_instances
-            .called(cluster_arn.to_string())
+            .called(cluster_arn.to_string());
         // TODO: find a better way to convert enum std::result::Result<_, Box<(dyn snafu::Error + Send + Sync + 'static)>>
         // to enum `std::result::Result<_, mock::error::Error>`
-        // match result {
-        //     Ok(a) => Ok(a),
-        //     Err(e) => error::ListInstance { err: e }.fail()?,
-        // }
+        match result {
+            Ok(a) => Ok(a),
+            Err(e) => error::ListInstance { err: e }.fail()?,
+        }
     }
 
     async fn describe_container_instances(
         &self,
         cluster_arn: String,
         container_instance_arns: &[String],
-    ) -> aws::error::Result<Instances> {
-        self
+    ) -> Result<Instances, Box<dyn std::error::Error + Send + Sync + 'static>> {
+        let result = self
             .describe_container_instances
-            .called((cluster_arn.to_string(), container_instance_arns.to_vec()))
+            .called((cluster_arn.to_string(), container_instance_arns.to_vec()));
         // TODO: find a better way to convert enum std::result::Result<_, Box<(dyn snafu::Error + Send + Sync + 'static)>>
         // to enum `std::result::Result<_, mock::error::Error>`
-        // match result {
-        //     Ok(a) => Ok(a),
-        //     Err(e) => error::DescribeInstance { err: e }.fail()?,
-        // }
+        match result {
+            Ok(a) => Ok(a),
+            Err(e) => error::DescribeInstance { err: e }.fail()?,
+        }
     }
 
     async fn send_command(
@@ -60,42 +56,44 @@ impl Mediator for AwsMediatorMock {
         instance_ids: &[String],
         params: HashMap<String, Vec<String>>,
         timeout: Option<i64>,
-    ) -> aws::error::Result<SSMCommandResponse> {
+    ) -> Result<SSMCommandResponse, Box<dyn std::error::Error + Send + Sync + 'static>> {
+        let result =
             self.send_command
-                .called((instance_ids.to_vec(), params.clone(), timeout.clone()))
+                .called((instance_ids.to_vec(), params.clone(), timeout.clone()));
         // TODO: find a better way to convert enum std::result::Result<_, Box<(dyn snafu::Error + Send + Sync + 'static)>>
         // to enum `std::result::Result<_, mock::error::Error>`
-        // match result {
-        //     Ok(a) => Ok(a),
-        //     Err(e) => error::SendCommand { err: e }.fail()?,
-        // }
+        match result {
+            Ok(a) => Ok(a),
+            Err(e) => error::SendCommand { err: e }.fail()?,
+        }
     }
 
-    async fn list_command_invocations(
+    async fn list_command_invocation(
         &self,
         command_id: String,
-    ) -> aws::error::Result<Vec<SSMInvocationResult>> {
-        self
-            .list_command_invocations
-            .called((command_id.clone()))
+        instance_id: String,
+    ) -> Result<SSMInvocationResult, Box<dyn std::error::Error + Send + Sync + 'static>> {
+        let result = self
+            .get_command_invocation
+            .called((command_id.clone(), instance_id.clone()));
         // TODO: find a better way to convert enum std::result::Result<_, Box<(dyn snafu::Error + Send + Sync + 'static)>>
         // to enum `std::result::Result<_, mock::error::Error>`
-        // match result {
-        //     Ok(a) => Ok(a),
-        //     Err(e) => error::GetCommandInvocation { err: e }.fail()?,
-        // }
+        match result {
+            Ok(a) => Ok(a),
+            Err(e) => error::GetCommandInvocation { err: e }.fail()?,
+        }
     }
 }
 
 impl AwsMediatorMock {
     pub fn new() -> AwsMediatorMock {
         AwsMediatorMock {
-            list_container_instances: Mock::new((error::Error::ListInstance {err: "Heeloo".to_string() })),
+            list_container_instances: Mock::new(Err("Failed to match given inputs".to_string())),
             describe_container_instances: Mock::new(
-                error::Error::ListInstance {err: "Heeloo".to_string() }),
-
-            send_command: Mock::new(error::Error::ListInstance {err: "Heeloo".to_string() }),
-            list_command_invocations: Mock::new(error::Error::ListInstance {err: "Heeloo".to_string() }),
+                Err("Failed to match given inputs".to_string()),
+            ),
+            send_command: Mock::new(Err("Failed to match given inputs".to_string())),
+            get_command_invocation: Mock::new(Err("Failed to match given inputs".to_string())),
         }
     }
 }
@@ -103,7 +101,7 @@ impl AwsMediatorMock {
 mod error {
     use snafu::Snafu;
 
-    #[derive(Debug, Snafu, Clone)]
+    #[derive(Debug, Snafu)]
     #[snafu(visibility = "pub(crate)")]
     pub(crate) enum Error {
         #[snafu(display("Mock failed : {}", err))]

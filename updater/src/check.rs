@@ -38,13 +38,13 @@ pub async fn check_updates(args: &Args, aws_api: Box<dyn Mediator>) -> error::Re
     info!("Get ssm send command result");
     // TODO - eliminate hosts not running Bottlerocket
     // TODO - eliminate hosts that have non-service tasks
-    loop {
-        let result = aws_api
-            .list_command_invocation(ssm_command_details.command_id.clone())
-            .await
-            .context(error::GetCommandOutput)?;
-        dbg!(result);
-    }
+
+    let result = aws_api
+        .list_command_invocations(ssm_command_details.command_id.clone())
+        .await
+        .context(error::GetCommandOutput)?;
+    dbg!(result);
+
     Ok(())
 }
 
