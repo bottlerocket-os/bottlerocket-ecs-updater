@@ -7,12 +7,16 @@ publish = false
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-anyhow = "1"
+async-trait = "0.1"
 env_logger = "0.8"
 log = "0.4"
 rusoto_core = { version = "0.46", default-features = false, features = [ "rustls" ] }
 rusoto_credential = "0.46"
 rusoto_ecs = { version = "0.46", default-features = false, features = [ "rustls" ] }
-rusoto_sts = { version = "0.46", default-features = false, features = [ "rustls" ] }
+rusoto_signature = "0.46"
+snafu = "0.6"
 structopt = "0.3"
 tokio = { version = "1", features = ["macros", "process"] }
+
+[dev-dependencies]
+mock-it = "0.3.0"
