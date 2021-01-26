@@ -1,0 +1,55 @@
+name: Updater CI
+on:
+  pull_request:
+    paths-ignore:
+      - '**.md'
+    branches: ['*']
+  push:
+    paths-ignore:
+      - '**.md'
+    branches: [develop]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Cargo Home Cache
+        uses: actions/cache@v2
+        env:
+          cache-name: cargo-home
+        with:
+          path: /usr/share/rust/.cargo
+          key: ${{ hashFiles('.github/cache-bust', '/usr/share/rust/.cargo/bin/cargo') }}-${{ hashFiles('updater/Cargo.lock', 'integ/Cargo.lock') }}
+          restore-keys: |
+            ${{ hashFiles('.github/cache-bust', '/usr/share/rust/.cargo/bin/cargo') }}-${{ hashFiles('updater/Cargo.lock', 'integ/Cargo.lock') }}
+            ${{ hashFiles('.github/cache-bust', '/usr/share/rust/.cargo/bin/cargo') }}-
+
+      - name: Updater Build Cache
+        uses: actions/cache@v2
+        env:
+          cache-name: updater-target
+        with:
+          path: updater/target
+          key: ${{ hashFiles('.github/cache-bust') }}-${{ hashFiles('updater/Cargo.lock') }}
+          restore-keys: |
+            ${{ hashFiles('.github/cache-bust') }}-
+
+      - name: Integ Build Cache
+        uses: actions/cache@v2
+        env:
+          cache-name: integ-target
+        with:
+          path: integ/target
+          key: ${{ hashFiles('.github/cache-bust') }}-${{ hashFiles('integ/Cargo.lock') }}
+          restore-keys: |
+            ${{ hashFiles('.github/cache-bust') }}-
+
+      - run: rustup update stable && cargo install cargo-deny
+      - run: make ci
+
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - run: make image

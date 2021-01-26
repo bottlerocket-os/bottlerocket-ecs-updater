@@ -21,3 +21,28 @@ image: fetch-sdk
 .PHONY: fetch-sdk
 fetch-sdk: # fetches and loads the image we use to build the updater docker image
 	scripts/load-bottlerocket-sdk.sh --site ${BOTTLEROCKET_SDK_SITE} --image ${BUILDER_IMAGE}
+
+.PHONY: check-licenses
+check-licenses:
+	cd updater && cargo deny check licenses
+	cd integ && cargo deny check licenses
+
+.PHONY: unit-tests
+unit-tests:
+	cd updater && cargo test --locked
+	cd integ && cargo test --locked
+
+.PHONY: build
+build:
+	cd updater && cargo build --locked
+	cd integ && cargo build --locked
+
+.PHONY: lint
+lint:
+	cd updater && cargo fmt -- --check
+	cd updater && cargo clippy --locked -- -D warnings
+	cd integ && cargo fmt -- --check
+	cd integ && cargo clippy --locked -- -D warnings
+
+.PHONY: ci # these are all of the checks (except for image) that we run for ci
+ci: check-licenses lint build unit-tests
