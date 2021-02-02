@@ -36,4 +36,5 @@ COPY --from=amazonlinux:2 /etc/ssl /etc/ssl
 COPY --from=amazonlinux:2 /etc/pki /etc/pki
 COPY --from=builder \
     /wrkdir/bottlerocket-ecs-updater \
-    /usr/local/bin/bottlerocket-ecs-updater
+    /bottlerocket-ecs-updater
+ENTRYPOINT ["/bottlerocket-ecs-updater"]
