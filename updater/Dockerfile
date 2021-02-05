@@ -22,7 +22,6 @@ ENV CARGO_HOME=/cargo_home
 ENV OUTPUT_DIR=/wrkdir/target/${RUST_TARGET}/release
 COPY ./Cargo.toml ./Cargo.lock ./
 COPY ./src ./src
-
 # mount cache volumes for cargo targets and cargo home, build the updater
 # binary, and copy the binary out of the cache volume
 RUN --mount=type=cache,target=/wrkdir/target,from=buildcache,source=/targetdir \
@@ -32,6 +31,9 @@ RUN --mount=type=cache,target=/wrkdir/target,from=buildcache,source=/targetdir \
 
 # create an image with just the binary
 FROM scratch
+# rusttls requires CA certificates store
+COPY --from=amazonlinux:2 /etc/ssl /etc/ssl
+COPY --from=amazonlinux:2 /etc/pki /etc/pki
 COPY --from=builder \
     /wrkdir/bottlerocket-ecs-updater \
     /usr/local/bin/bottlerocket-ecs-updater
