@@ -1,0 +1,67 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: 'ECS Updater Integration Test Cluster'
+Parameters:
+  IntegSharedResourceStack:
+    Type: String
+    Description: 'Name of the CloudFormation stack that sets up the shared resource for testing.'
+  ClusterName:
+    Description: 'Name of ECS cluster to create'
+    Type: String
+  InstanceCount:
+      Description: 'Desired number of Bottlerocket instances in cluster'
+      Default: 2
+      Type: Number
+  ImageID:
+        Description: 'Bottlerocket `aws-ecs-1` variant image id'
+        Type: String
+  InstanceType:
+    Type: String
+    Default: m5.xlarge
+    Description: 'Instance type for the cluster instances. Default is m5.xlarge'
+Resources:
+  Cluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Ref ClusterName
+  LaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateData:
+        IamInstanceProfile:
+          Name:
+            Fn::ImportValue:
+              !Sub "${IntegSharedResourceStack}:EcsInstanceProfile"
+        ImageId: !Ref ImageID
+        InstanceType: !Ref InstanceType
+        SecurityGroupIds:
+          - Fn::ImportValue:
+              !Sub "${IntegSharedResourceStack}:SecurityGroupID"
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+              - Key: "Name"
+                Value: !Sub "${ClusterName}-instance"
+        UserData:
+          Fn::Base64:
+            !Sub |
+              [settings.ecs]
+              cluster = "${ClusterName}"
+  AutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      MinSize: !Ref InstanceCount
+      MaxSize: !Ref InstanceCount
+      DesiredCapacity: !Ref InstanceCount
+      VPCZoneIdentifier:
+        Fn::Split:
+        - ","
+        - Fn::ImportValue:
+            !Sub "${IntegSharedResourceStack}:PublicSubnets"
+      MixedInstancesPolicy:
+        InstancesDistribution:
+          OnDemandBaseCapacity: 1
+          OnDemandPercentageAboveBaseCapacity: 0
+        LaunchTemplate:
+          LaunchTemplateSpecification:
+            LaunchTemplateId: !Ref LaunchTemplate
+            Version: !GetAtt LaunchTemplate.LatestVersionNumber

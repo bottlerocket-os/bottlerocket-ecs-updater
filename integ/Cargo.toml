@@ -8,12 +8,10 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 async-trait = "0.1"
-handlebars = "3.0"
 rusoto_cloudformation = "0.46"
 rusoto_core = "0.46"
 rusoto_credential = "0.46"
 rusoto_signature = "0.46"
-serde = { version = "1", features = ["derive"] }
 snafu = "0.6"
 structopt = "0.3"
 tokio = { version = "1", features = ["macros", "process"] }
