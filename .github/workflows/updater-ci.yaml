@@ -45,7 +45,7 @@ jobs:
           restore-keys: |
             ${{ hashFiles('.github/cache-bust') }}-
 
-      - run: rustup update stable && cargo install cargo-deny
+      - run: rustup update stable && cargo install cargo-deny --locked
       - run: make ci
 
   image:
