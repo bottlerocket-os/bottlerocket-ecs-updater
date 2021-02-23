@@ -1,5 +1,5 @@
 mod mocks;
-use bottlerocket_ecs_updater::EcsMediator;
+use bottlerocket_ecs_updater::{EcsMediator, Instance, Instances};
 use mocks::MockEcsMediator;
 
 #[tokio::test]
@@ -9,15 +9,32 @@ use mocks::MockEcsMediator;
 /// things.
 async fn sample_test() {
     let cluster = "test_cluster";
-    let expected = vec!["container_instance_1".to_string()];
+    let expected = Instances {
+        bottlerocket_instances: vec![Instance {
+            instance_id: "container_instance_1".to_string(),
+            status: "Active".to_string(),
+        }],
+        next_token: None,
+    };
     let ecs_mock = MockEcsMediator::new();
     ecs_mock
-        .list_container_instances
-        .given(cluster.to_string())
+        .list_bottlerocket_instances
+        .given((cluster.to_string(), None, None))
         .will_return(Ok(expected));
 
-    let listed_instances = ecs_mock.list_container_instances(cluster).await.unwrap();
+    let listed_instances = ecs_mock
+        .list_bottlerocket_instances(cluster, None, None)
+        .await
+        .unwrap();
 
-    assert_eq!(1, listed_instances.len());
-    assert_eq!("container_instance_1", listed_instances.get(0).unwrap());
+    assert_eq!(1, listed_instances.bottlerocket_instances.len());
+    assert_eq!(
+        "container_instance_1",
+        listed_instances
+            .bottlerocket_instances
+            .get(0)
+            .unwrap()
+            .instance_id
+    );
+    assert_eq!(None, listed_instances.next_token);
 }

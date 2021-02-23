@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use bottlerocket_ecs_updater::{EcsMediator, Error, Result};
+use bottlerocket_ecs_updater::{EcsMediator, Error, Instances, Result};
 use mock_it::Mock;
 use std::fmt::{Display, Formatter};
 
@@ -24,14 +24,20 @@ unsafe impl Send for MockErr {}
 pub type MockResult<T> = std::result::Result<T, MockErr>;
 
 pub struct MockEcsMediator {
-    pub list_container_instances: Mock<String, MockResult<Vec<String>>>,
+    pub list_bottlerocket_instances:
+        Mock<(String, Option<i64>, Option<String>), MockResult<Instances>>,
 }
 
 #[async_trait]
 impl EcsMediator for MockEcsMediator {
-    async fn list_container_instances(&self, cluster: &str) -> Result<Vec<String>> {
-        self.list_container_instances
-            .called(cluster.to_string())
+    async fn list_bottlerocket_instances(
+        &self,
+        cluster: &str,
+        max_results: Option<i64>,
+        next_token: Option<String>,
+    ) -> Result<Instances> {
+        self.list_bottlerocket_instances
+            .called((cluster.to_string(), max_results, next_token))
             .map_err(|e| Error::new(e))
     }
 }
@@ -39,7 +45,7 @@ impl EcsMediator for MockEcsMediator {
 impl MockEcsMediator {
     pub fn new() -> MockEcsMediator {
         MockEcsMediator {
-            list_container_instances: Mock::new(Err(MockErr {
+            list_bottlerocket_instances: Mock::new(Err(MockErr {
                 msg: Some("Mock does not exist for given input".into()),
             })),
         }
