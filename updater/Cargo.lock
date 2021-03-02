@@ -78,6 +78,7 @@ name = "bottlerocket-ecs-updater"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "chrono",
  "env_logger",
  "log",
  "mock-it",
@@ -86,6 +87,8 @@ dependencies = [
  "rusoto_ecs",
  "rusoto_signature",
  "rusoto_ssm",
+ "serde",
+ "serde_json",
  "snafu",
  "structopt",
  "tokio",
@@ -125,6 +128,7 @@ dependencies = [
  "num-integer",
  "num-traits",
  "serde",
+ "time 0.1.43",
  "winapi",
 ]
 
@@ -841,7 +845,7 @@ dependencies = [
  "rustc_version",
  "serde",
  "sha2",
- "time",
+ "time 0.2.25",
  "tokio",
 ]
 
@@ -1196,6 +1200,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8018d24e04c95ac8790716a5987d0fec4f8b27249ffa0f7d33f1369bdfb88cbd"
 dependencies = [
  "once_cell",
+]
+
+[[package]]
+name = "time"
+version = "0.1.43"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ca8a50ef2360fbd1eeb0ecd46795a87a19024eb4b53c5dc916ca1fd95fe62438"
+dependencies = [
+ "libc",
+ "winapi",
 ]
 
 [[package]]

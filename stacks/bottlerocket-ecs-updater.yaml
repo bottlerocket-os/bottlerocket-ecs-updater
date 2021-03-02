@@ -66,6 +66,7 @@ Resources:
               - Effect: Allow
                 Action:
                   - 'ssm:ListCommandInvocations'
+                  - 'ssm:GetCommandInvocation'
                 Resource:
                   - !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:*"
   UpdaterTaskDefinition:

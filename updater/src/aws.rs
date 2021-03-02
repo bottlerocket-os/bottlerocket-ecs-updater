@@ -1,5 +1,6 @@
 use crate::{
-    EcsMediator, Instance, Instances, SsmCommandDetails, SsmInvocationResult, SsmMediator,
+    EcsMediator, Instance, Instances, SsmCommandDetails, SsmInvocationOutput, SsmInvocationStatus,
+    SsmMediator,
 };
 use async_trait::async_trait;
 use rusoto_core::{DispatchSignedRequest, Region};
@@ -7,8 +8,10 @@ use rusoto_credential::{DefaultCredentialsProvider, ProvideAwsCredentials};
 use rusoto_ecs::{
     Attribute, DescribeContainerInstancesRequest, Ecs, EcsClient, ListContainerInstancesRequest,
 };
-use rusoto_ssm::{ListCommandInvocationsRequest, SendCommandRequest, Ssm, SsmClient};
-use snafu::{ensure, OptionExt, ResultExt, Snafu};
+use rusoto_ssm::{
+    GetCommandInvocationRequest, ListCommandInvocationsRequest, SendCommandRequest, Ssm, SsmClient,
+};
+use snafu::{OptionExt, ResultExt, Snafu};
 use std::collections::HashMap;
 use std::str::FromStr;
 use tokio::time::{sleep, Duration};
@@ -35,6 +38,11 @@ enum Error {
     EcsMissingField {
         api: &'static str,
         field: &'static str,
+    },
+
+    #[snafu(display("Failed to get command invocation: {}", source))]
+    GetCommandInvocations {
+        source: rusoto_core::RusotoError<rusoto_ssm::GetCommandInvocationError>,
     },
 
     #[snafu(display("Failed to create HTTP client: {}", source))]
@@ -261,13 +269,12 @@ impl SsmMediator for AwsSsmMediator {
     async fn list_command_invocations(
         &self,
         command_id: &str,
-        details: bool,
-    ) -> crate::Result<Vec<SsmInvocationResult>> {
+    ) -> crate::Result<Vec<SsmInvocationStatus>> {
         let resp = self
             .ssm_client
             .list_command_invocations(ListCommandInvocationsRequest {
                 command_id: Some(command_id.to_string()),
-                details: Some(details),
+                details: Some(false),
                 ..ListCommandInvocationsRequest::default()
             })
             .await
@@ -281,38 +288,47 @@ impl SsmMediator for AwsSsmMediator {
                 field: "instance_id",
                 api: "list_command_invocations",
             })?;
-            let mut result = SsmInvocationResult {
+            let result = SsmInvocationStatus {
                 instance_id: instance_id.clone(),
                 invocation_status: invocation.status.context(SsmMissingField {
                     field: "command_invocations[].status",
                     api: "list_command_invocations",
                 })?,
-                script_output: None,
-                script_response_code: None,
             };
-            // command_plugins is available only when we fetch invocations with details
-            if details {
-                let plugins = invocation.command_plugins.context(SsmMissingField {
-                    field: "command_invocations[].command_plugins",
-                    api: "list_command_invocations",
-                })?;
-                //  Expect only single plugin to exist per instance for our command shell script
-                ensure!(plugins.len() == 1, MissingPlugin { instance_id });
-                result.script_response_code = Some(plugins[0].response_code.to_owned().context(
-                    SsmMissingField {
-                        field: "command_invocations[].command_plugins[0].response_code",
-                        api: "list_command_invocations",
-                    },
-                )?);
-                result.script_output =
-                    Some(plugins[0].output.to_owned().context(SsmMissingField {
-                        field: "command_invocations[].command_plugins[0].output",
-                        api: "list_command_invocations",
-                    })?);
-            }
             invocation_list.push(result);
         }
         Ok(invocation_list)
+    }
+
+    async fn get_command_invocations(
+        &self,
+        command_id: &str,
+        instance_id: &str,
+    ) -> crate::Result<SsmInvocationOutput> {
+        let resp = self
+            .ssm_client
+            .get_command_invocation(GetCommandInvocationRequest {
+                command_id: command_id.to_string(),
+                instance_id: instance_id.to_string(),
+                ..GetCommandInvocationRequest::default()
+            })
+            .await
+            .context(GetCommandInvocations)?;
+        Ok(SsmInvocationOutput {
+            instance_id: instance_id.to_string(),
+            standard_output: resp.standard_output_content.context(SsmMissingField {
+                field: "standard_output_content",
+                api: "get_command_invocations",
+            })?,
+            status: resp.status.context(SsmMissingField {
+                field: "status",
+                api: "get_command_invocations",
+            })?,
+            response_code: resp.response_code.context(SsmMissingField {
+                field: "response_code",
+                api: "get_command_invocations",
+            })?,
+        })
     }
 
     async fn wait_command_complete(&self, command_id: &str) -> crate::Result<()> {
@@ -321,7 +337,7 @@ impl SsmMediator for AwsSsmMediator {
             // we need to wait before calling invocation because it takes some time
             // for command to be registered before we can list invocations.
             sleep(Duration::from_millis(1000)).await;
-            let results = self.list_command_invocations(command_id, false).await?;
+            let results = self.list_command_invocations(command_id).await?;
             let is_any_pending = results
                 .iter()
                 .any(|result| result.invocation_status == "InProgress");

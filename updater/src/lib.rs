@@ -117,15 +117,24 @@ pub struct SsmCommandDetails {
 
 // invocation results from ssm `ListCommandInvocationsResult` will be mapped to this
 #[derive(Debug, Clone, PartialEq)]
-pub struct SsmInvocationResult {
+pub struct SsmInvocationStatus {
     // ec2 instance id on which command ran
     pub instance_id: String,
-    // ssm command script output
-    pub script_output: Option<String>,
     // command invocation status, valid values are Success, Failed, or Pending
     pub invocation_status: String,
+}
+
+// invocation results from ssm `GetCommandInvocationResult` will be mapped to this
+#[derive(Debug, Clone, PartialEq)]
+pub struct SsmInvocationOutput {
+    // ec2 instance id on which command ran
+    pub instance_id: String,
+    // ssm command script output on stdout
+    pub standard_output: String,
+    // command invocation status, valid values are Success, Failed, or Pending
+    pub status: String,
     // command invocation script response code
-    pub script_response_code: Option<i64>,
+    pub response_code: i64,
 }
 
 /// Introducing a trait abstraction over the the SSM API allows us to mock the API and write tests
@@ -141,12 +150,15 @@ pub trait SsmMediator {
         timeout: Option<i64>,
     ) -> Result<SsmCommandDetails>;
 
+    /// Gets the all ssm command status
+    async fn list_command_invocations(&self, command_id: &str) -> Result<Vec<SsmInvocationStatus>>;
+
     /// Gets the ssm command result
-    async fn list_command_invocations(
+    async fn get_command_invocations(
         &self,
         command_id: &str,
-        details: bool,
-    ) -> Result<Vec<SsmInvocationResult>>;
+        instance_id: &str,
+    ) -> Result<SsmInvocationOutput>;
 
     async fn wait_command_complete(&self, command_id: &str) -> Result<()>;
 }
