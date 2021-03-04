@@ -11,6 +11,7 @@ use rusoto_ssm::{ListCommandInvocationsRequest, SendCommandRequest, Ssm, SsmClie
 use snafu::{ensure, OptionExt, ResultExt, Snafu};
 use std::collections::HashMap;
 use std::str::FromStr;
+use tokio::time::{sleep, Duration};
 
 // TODO: might need tuning for better default value
 const SSM_COMMAND_DEFAULT_TIMEOUT_SECS: i64 = 60;
@@ -312,5 +313,23 @@ impl SsmMediator for AwsSsmMediator {
             invocation_list.push(result);
         }
         Ok(invocation_list)
+    }
+
+    async fn wait_command_complete(&self, command_id: &str) -> crate::Result<()> {
+        loop {
+            println!("waiting for command to complete");
+            // we need to wait before calling invocation because it takes some time
+            // for command to be registered before we can list invocations.
+            sleep(Duration::from_millis(1000)).await;
+            let results = self.list_command_invocations(command_id, false).await?;
+            let is_any_pending = results
+                .iter()
+                .any(|result| result.invocation_status == "InProgress");
+            if !is_any_pending {
+                // exit, all command have completed
+                break;
+            }
+        }
+        Ok(())
     }
 }

@@ -14,8 +14,9 @@ async fn main() {
 }
 
 pub async fn main_inner(args: Args) -> Result<()> {
-    let ecs_mediator = new_ecs(&args.region)?;
-    let ssm_mediator = new_ssm(&args.region)?;
-    let updater = Updater::new(args, ecs_mediator, ssm_mediator);
-    updater.run().await
+    let ecs = new_ecs(&args.region)?;
+    let ssm = new_ssm(&args.region)?;
+    let updater = Updater::new(args, ecs, ssm);
+    updater.run().await?;
+    Ok(())
 }

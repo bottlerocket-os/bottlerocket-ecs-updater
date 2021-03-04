@@ -6,8 +6,10 @@ the `integ` project. This project is not meant to be used as a library in other 
 #![deny(rust_2018_idioms)]
 
 mod aws;
+mod updater;
 
 use crate::aws::{AwsEcsMediator, AwsSsmMediator};
+pub use crate::updater::Updater;
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
@@ -31,6 +33,13 @@ impl Error {
 impl Display for Error {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         std::fmt::Display::fmt(&self.0, f)
+    }
+}
+
+// implement std::error::Error to support Error type as source for snafu
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(self)
     }
 }
 
@@ -62,39 +71,6 @@ pub fn new_ecs(region: &str) -> Result<impl EcsMediator> {
 /// Creates a new concrete implementation of [`SsmMediator`] using `rusoto`.
 pub fn new_ssm(region: &str) -> Result<impl SsmMediator> {
     Ok(AwsSsmMediator::new(region)?)
-}
-
-// TODO - this abstraction may inhibit testing, it may need to change as functionality expands.
-/// The long-lived object that will watch an ECS cluster and update Bottlerocket hosts.
-pub struct Updater<T: EcsMediator, S: SsmMediator> {
-    cluster: String,
-    ecs: T,
-    // TODO: remove when we use api calls to check updates.
-    #[allow(dead_code)]
-    ssm: S,
-}
-
-impl<T: EcsMediator, S: SsmMediator> Updater<T, S> {
-    /// Create a new `Updater`.
-    pub fn new(args: Args, ecs_mediator: T, ssm_mediator: S) -> Self {
-        Self {
-            cluster: args.cluster,
-            ecs: ecs_mediator,
-            ssm: ssm_mediator,
-        }
-    }
-
-    /// Run the `Updater`
-    // TODO - once we start looping we may need a cancellation mechanism, watch for SIGINT etc.
-    pub async fn run(&self) -> Result<()> {
-        // TODO: use max_results and next_token to query instances in batch
-        let list = self
-            .ecs
-            .list_bottlerocket_instances(&self.cluster, None, None)
-            .await?;
-        println!("{:?}", list);
-        Ok(())
-    }
 }
 
 // instances in a batch running Bottlerocket OS will be mapped to this
@@ -171,4 +147,6 @@ pub trait SsmMediator {
         command_id: &str,
         details: bool,
     ) -> Result<Vec<SsmInvocationResult>>;
+
+    async fn wait_command_complete(&self, command_id: &str) -> Result<()>;
 }

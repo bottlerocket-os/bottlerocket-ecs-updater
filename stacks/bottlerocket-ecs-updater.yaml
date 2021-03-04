@@ -52,6 +52,22 @@ Resources:
                   - 'ecs:ListContainerInstances'
                 Resource:
                   - !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:cluster/${ClusterName}'
+              - Effect: Allow
+                Action:
+                  - 'ecs:DescribeContainerInstances'
+                Resource:
+                  - !Sub "arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:container-instance/*"
+              - Effect: Allow
+                Action:
+                  - 'ssm:SendCommand'
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}::document/AWS-RunShellScript"
+                  - !Sub "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/*"
+              - Effect: Allow
+                Action:
+                  - 'ssm:ListCommandInvocations'
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:*"
   UpdaterTaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Properties:
