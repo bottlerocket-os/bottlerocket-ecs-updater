@@ -1,0 +1,132 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Bottlerocket ECS updater automation & resources'
+Parameters:
+  ClusterName:
+    Description: 'Name of ECS cluster to manage Bottlerocket instances in'
+    Type: String
+  Subnets:
+    Description: 'List of VPC Subnet IDs where the updater should run. The subnets must have a route to the Internet via an Internet Gateway.'
+    Type: List<AWS::EC2::Subnet::Id>
+  UpdaterImage:
+    Description: 'Bottlerocket updater container image'
+    Type: String
+  LogGroupName:
+    Description: 'Log group name for Bottlerocket updater logs'
+    Type: String
+Resources:
+  ExecutionRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - 'ecs-tasks.amazonaws.com'
+            Action:
+              - 'sts:AssumeRole'
+      Path: !Sub /${AWS::StackName}/
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy'
+  TaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: 'Role allowing the Bottlerocket ECS Updater to manage Bottlerocket instances'
+      Path: !Sub '/${AWS::StackName}/'
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: 'ecs-tasks.amazonaws.com'
+            Action:
+              - 'sts:AssumeRole'
+      Policies:
+        - PolicyName: 'BottlerocketEcsUpdaterPolicy'
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'ecs:ListContainerInstances'
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:cluster/${ClusterName}'
+  UpdaterTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      Cpu: 256
+      Memory: 0.5GB
+      ExecutionRoleArn: !GetAtt ExecutionRole.Arn
+      TaskRoleArn: !GetAtt TaskRole.Arn
+      ContainerDefinitions:
+        - Name: BottlerocketEcsUpdaterService
+          Image: !Ref UpdaterImage
+          Command:
+            - -cluster
+            - !Ref ClusterName
+            - -region
+            - !Ref AWS::Region
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-region: !Ref AWS::Region
+              awslogs-group: !Ref LogGroupName
+              awslogs-stream-prefix: !Sub '/ecs/bottlerocket-updater/${ClusterName}'
+  BottlerocketUpdaterSchedule:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: "Check for Bottlerocket updates on a schedule"
+      # Run Task every 5 minutes
+      ScheduleExpression: "cron(0/5 * * * ? *)"
+      State: 'ENABLED'
+      Targets:
+        - Id: ecs-updater-fargate-task
+          RoleArn: !GetAtt CronRole.Arn
+          Arn: !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:cluster/${ClusterName}'
+          EcsParameters:
+            LaunchType: FARGATE
+            TaskCount: 1
+            TaskDefinitionArn: !Ref UpdaterTaskDefinition
+            NetworkConfiguration:
+              AwsVpcConfiguration:
+                # The Bottlerocket ECS Updater does not need a public IP for its operations. The public IP
+                # is only required to pull images from ECR as a Fargate task
+                AssignPublicIp: ENABLED
+                Subnets: !Ref Subnets
+  CronRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service:
+                - "events.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      Path: !Sub '/${AWS::StackName}/'
+      Policies:
+        - PolicyName: "BottlerocketEcsUpdaterSchedulerPolicy"
+          PolicyDocument:
+            Statement:
+              - Effect: "Allow"
+                Condition:
+                  ArnEquals:
+                    ecs:cluster: !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:cluster/${ClusterName}'
+                Action: "ecs:RunTask"
+                Resource:
+                  - !Ref UpdaterTaskDefinition
+              - Effect: "Allow"
+                Condition:
+                  ArnEquals:
+                    ecs:cluster: !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:cluster/${ClusterName}'
+                Action:
+                  - "iam:PassRole"
+                Resource:
+                  - !GetAtt TaskRole.Arn
+                  - !GetAtt ExecutionRole.Arn
