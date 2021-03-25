@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"log"
 	"os"
 
@@ -27,21 +28,72 @@ func main() {
 		flag.Usage()
 		os.Exit(1)
 	}
-	// Using default credential Provider; it looks for credentials in following order:
-	// 1. Environment variables.
-	// 2. Shared credentials file.
-	// 3. If application uses an ECS task definition or RunTask API operation, IAM role for tasks.
-	//
-	// default credential Provider best suits our requirement where we can use shared cred files for local run
-	// and IAM role for Fargate task
+
 	sess := session.Must(session.NewSession(&aws.Config{
 		Region: aws.String(*flagRegion),
 	}))
 	ecsClient := ecs.New(sess)
-	resp, err := ecsClient.ListContainerInstances(&ecs.ListContainerInstancesInput{Cluster: flagCluster})
+
+	instances, err := listContainerInstances(*flagCluster, ecsClient)
+	errCheck(err)
+
+	bottlerocketInstances, err := describeContainerInstances(*flagCluster, instances, ecsClient)
+	errCheck(err)
+
+
+	fmt.Println(bottlerocketInstances)
+}
+
+func errCheck(err error){
 	if err != nil {
-		log.Printf("Cannot list container Instances: %#v", err)
+		fmt.Fprintf(os.Stderr, err.Error())
 		os.Exit(1)
 	}
-	log.Printf("List of container Instances %#v", resp)
+}
+
+// checks if ECS Attributes struct contains a specified string
+func contains(attrs []*ecs.Attribute, searchString string) bool {
+	for _, attr := range attrs {
+		if aws.StringValue(attr.Name) == searchString {
+			return true
+		}
+	}
+	return false
+}
+
+func listContainerInstances(cluster string, ecsClient *ecs.ECS) ([]*string, error) {
+	resp, err := ecsClient.ListContainerInstances(&ecs.ListContainerInstancesInput{Cluster: &cluster})
+	if err != nil {
+		return nil, fmt.Errorf("Cannot list container instances: %#v", err)
+	}
+	log.Printf("%#v", resp)
+	var values []*string
+
+	for _, v := range resp.ContainerInstanceArns {
+		values = append(values, v)
+	}
+	return values, nil
+}
+
+func describeContainerInstances(cluster string, instances []*string, ecsClient *ecs.ECS) ([]string, error) {
+	resp, err := ecsClient.DescribeContainerInstances(&ecs.DescribeContainerInstancesInput{
+		Cluster: &cluster, ContainerInstances: instances,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("Cannot describe container instances: %#v", err)
+	}
+	log.Printf("Container descriptions: %#v", resp)
+
+	var ec2ids []string
+
+	//Check the DescribeInstances response for Bottlerocket nodes, add them to ec2ids if detected
+	for _, instance := range resp.ContainerInstances {
+		if contains(instance.Attributes, "bottlerocket.variant") {
+			ec2ids = append(ec2ids, *instance.Ec2InstanceId)
+			log.Printf("Bottlerocket instance detected. Instance %#v added to check updates", *instance.Ec2InstanceId)
+		} else {
+			log.Printf("No Bottlerocket instances detected")
+		}
+	}
+	return ec2ids, nil
 }
