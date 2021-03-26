@@ -34,34 +34,24 @@ func main() {
 	}))
 	ecsClient := ecs.New(sess)
 
-	instances, err := listContainerInstances(*flagCluster, ecsClient)
-	errCheck(err)
-
-	bottlerocketInstances, err := describeContainerInstances(*flagCluster, instances, ecsClient)
-	errCheck(err)
-
-
-	fmt.Println(bottlerocketInstances)
-}
-
-func errCheck(err error){
+	instances, err := listContainerInstances(ecsClient, *flagCluster)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, err.Error())
 		os.Exit(1)
 	}
-}
 
-// checks if ECS Attributes struct contains a specified string
-func contains(attrs []*ecs.Attribute, searchString string) bool {
-	for _, attr := range attrs {
-		if aws.StringValue(attr.Name) == searchString {
-			return true
-		}
+	bottlerocketInstances, err := filterBottlerocketInstances(ecsClient, *flagCluster, instances)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, err.Error())
+		os.Exit(1)
 	}
-	return false
+
+	if len(bottlerocketInstances) == 0 {
+		log.Printf("No Bottlerocket instances detected")
+	}
 }
 
-func listContainerInstances(cluster string, ecsClient *ecs.ECS) ([]*string, error) {
+func listContainerInstances(ecsClient *ecs.ECS, cluster string) ([]*string, error) {
 	resp, err := ecsClient.ListContainerInstances(&ecs.ListContainerInstancesInput{Cluster: &cluster})
 	if err != nil {
 		return nil, fmt.Errorf("Cannot list container instances: %#v", err)
@@ -75,7 +65,7 @@ func listContainerInstances(cluster string, ecsClient *ecs.ECS) ([]*string, erro
 	return values, nil
 }
 
-func describeContainerInstances(cluster string, instances []*string, ecsClient *ecs.ECS) ([]string, error) {
+func filterBottlerocketInstances(ecsClient *ecs.ECS, cluster string, instances []*string) ([]string, error) {
 	resp, err := ecsClient.DescribeContainerInstances(&ecs.DescribeContainerInstancesInput{
 		Cluster: &cluster, ContainerInstances: instances,
 	})
@@ -84,16 +74,24 @@ func describeContainerInstances(cluster string, instances []*string, ecsClient *
 	}
 	log.Printf("Container descriptions: %#v", resp)
 
-	var ec2ids []string
+	var ec2IDs []string
 
 	//Check the DescribeInstances response for Bottlerocket nodes, add them to ec2ids if detected
 	for _, instance := range resp.ContainerInstances {
-		if contains(instance.Attributes, "bottlerocket.variant") {
-			ec2ids = append(ec2ids, *instance.Ec2InstanceId)
+		if containsAttribute(instance.Attributes, "bottlerocket.variant") {
+			ec2IDs = append(ec2IDs, *instance.Ec2InstanceId)
 			log.Printf("Bottlerocket instance detected. Instance %#v added to check updates", *instance.Ec2InstanceId)
-		} else {
-			log.Printf("No Bottlerocket instances detected")
 		}
 	}
-	return ec2ids, nil
+	return ec2IDs, nil
+}
+
+// checks if ECS Attributes struct contains a specified string
+func containsAttribute(attrs []*ecs.Attribute, searchString string) bool {
+	for _, attr := range attrs {
+		if aws.StringValue(attr.Name) == searchString {
+			return true
+		}
+	}
+	return false
 }
