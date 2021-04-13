@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/service/ec2"
 	"github.com/aws/aws-sdk-go/service/ecs"
 	"github.com/aws/aws-sdk-go/service/ssm"
 )
@@ -155,7 +156,7 @@ func (u *updater) activateInstance(containerInstance *string) error {
 	if len(resp.Failures) != 0 {
 		return fmt.Errorf("Container instance %s failed to activate: %#v", aws.StringValue(containerInstance), resp.Failures)
 	}
-	log.Printf("Container instance state changed to ACTIVE")
+	log.Printf("Container instance %s state changed to ACTIVE", aws.StringValue(containerInstance))
 	return nil
 }
 
@@ -209,37 +210,59 @@ func (u *updater) sendCommand(instanceIDs []string, ssmCommand string) (string, 
 	return commandID, nil
 }
 
-func (u *updater) checkSSMCommandOutput(commandID string, instanceIDs []string) ([]string, error) {
-	updateCandidates := make([]string, 0)
-	for _, v := range instanceIDs {
-		resp, err := u.ssm.GetCommandInvocation(&ssm.GetCommandInvocationInput{
-			CommandId:  aws.String(commandID),
-			InstanceId: aws.String(v),
-		})
-		if err != nil {
-			return nil, fmt.Errorf("failed to retrieve command invocation output: %#v", err)
-		}
+func (u *updater) getCommandResult(commandID string, instanceID string) ([]byte, error) {
+	resp, err := u.ssm.GetCommandInvocation(&ssm.GetCommandInvocationInput{
+		CommandId:  aws.String(commandID),
+		InstanceId: aws.String(instanceID),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve command invocation output: %#v", err)
+	}
+	commandResults := []byte(aws.StringValue(resp.StandardOutputContent))
+	return commandResults, nil
+}
 
-		type updateCheckResult struct {
-			UpdateState string `json:"update_state"`
-		}
-
-		var result updateCheckResult
-		err = json.Unmarshal([]byte(*resp.StandardOutputContent), &result)
-		if err != nil {
-			log.Printf("failed to unmarshal command invocation output: %#v", err)
-		}
-		log.Println("update_state: ", result)
-
-		switch result.UpdateState {
-		case "Available":
-			updateCandidates = append(updateCandidates, v)
-		}
+func isUpdateAvailable(commandOutput []byte) (bool, error) {
+	type updateCheckResult struct {
+		UpdateState string `json:"update_state"`
 	}
 
-	if len(updateCandidates) == 0 {
-		log.Printf("No instances to update")
-		return nil, nil
+	var updateState updateCheckResult
+	err := json.Unmarshal(commandOutput, &updateState)
+	if err != nil {
+		return false, fmt.Errorf("failed to unmarshal update state: %#v", err)
 	}
-	return updateCandidates, nil
+	return updateState.UpdateState == "Available", nil
+}
+
+// getActiveVersion unmarshals GetCommandInvocation output to determine the active version of a Bottlerocket instance.
+// Takes GetCommandInvocation output as a parameter and returns the active version in use.
+func getActiveVersion(commandOutput []byte) (string, error) {
+	type version struct {
+		Version string `json:"version"`
+	}
+
+	type image struct {
+		Image version `json:"image"`
+	}
+
+	type partition struct {
+		ActivePartition image `json:"active_partition"`
+	}
+
+	var activeVersion partition
+	err := json.Unmarshal(commandOutput, &activeVersion)
+	if err != nil {
+		log.Printf("failed to unmarshal command invocation output: %#v", err)
+		return "", err
+	}
+	versionInUse := activeVersion.ActivePartition.Image.Version
+	return versionInUse, nil
+}
+
+// waitUntilOk takes an EC2 ID as a parameter and waits until the specified EC2 instance is in an Ok status.
+func (u *updater) waitUntilOk(ec2ID string) error {
+	return u.ec2.WaitUntilInstanceStatusOk(&ec2.DescribeInstanceStatusInput{
+		InstanceIds: []*string{aws.String(ec2ID)},
+	})
 }
