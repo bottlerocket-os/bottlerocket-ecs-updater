@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -9,6 +10,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/ecs"
+	"github.com/aws/aws-sdk-go/service/ssm"
 )
 
 var (
@@ -17,81 +19,54 @@ var (
 )
 
 func main() {
+	if err := _main(); err != nil {
+		fmt.Fprintf(os.Stderr, err.Error())
+		os.Exit(1)
+	}
+}
+
+func _main() error {
 	flag.Parse()
 	switch {
 	case *flagCluster == "":
-		log.Println("cluster is required")
 		flag.Usage()
-		os.Exit(1)
+		return errors.New("cluster is required")
 	case *flagRegion == "":
-		log.Println("region is required")
 		flag.Usage()
-		os.Exit(1)
+		return errors.New("region is required")
 	}
 
 	sess := session.Must(session.NewSession(&aws.Config{
 		Region: aws.String(*flagRegion),
 	}))
 	ecsClient := ecs.New(sess)
+	ssmClient := ssm.New(sess, aws.NewConfig().WithLogLevel(aws.LogDebugWithHTTPBody))
 
-	instances, err := listContainerInstances(ecsClient, *flagCluster)
+	instances, err := listContainerInstances(ecsClient, *flagCluster, pageSize)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, err.Error())
-		os.Exit(1)
+		return err
 	}
 
 	bottlerocketInstances, err := filterBottlerocketInstances(ecsClient, *flagCluster, instances)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, err.Error())
-		os.Exit(1)
+		return err
 	}
 
 	if len(bottlerocketInstances) == 0 {
 		log.Printf("No Bottlerocket instances detected")
+		return nil
 	}
-}
 
-func listContainerInstances(ecsClient *ecs.ECS, cluster string) ([]*string, error) {
-	resp, err := ecsClient.ListContainerInstances(&ecs.ListContainerInstancesInput{Cluster: &cluster})
+	commandID, err := sendCommand(ssmClient, bottlerocketInstances, "apiclient update check")
 	if err != nil {
-		return nil, fmt.Errorf("Cannot list container instances: %#v", err)
+		return err
 	}
-	log.Printf("%#v", resp)
-	var values []*string
 
-	for _, v := range resp.ContainerInstanceArns {
-		values = append(values, v)
-	}
-	return values, nil
-}
-
-func filterBottlerocketInstances(ecsClient *ecs.ECS, cluster string, instances []*string) ([]string, error) {
-	resp, err := ecsClient.DescribeContainerInstances(&ecs.DescribeContainerInstancesInput{
-		Cluster: &cluster, ContainerInstances: instances,
-	})
+	instancesToUpdate, err := checkCommandOutput(ssmClient, commandID, bottlerocketInstances)
 	if err != nil {
-		return nil, fmt.Errorf("Cannot describe container instances: %#v", err)
+		return err
 	}
-	log.Printf("Container descriptions: %#v", resp)
 
-	var ec2IDs []string
-
-	//Check the DescribeInstances response for Bottlerocket nodes, add them to ec2ids if detected
-	for _, instance := range resp.ContainerInstances {
-		if containsAttribute(instance.Attributes, "bottlerocket.variant") {
-			ec2IDs = append(ec2IDs, *instance.Ec2InstanceId)
-			log.Printf("Bottlerocket instance detected. Instance %#v added to check updates", *instance.Ec2InstanceId)
-		}
-	}
-	return ec2IDs, nil
-}
-
-// checks if ECS Attributes struct contains a specified string
-func containsAttribute(attrs []*ecs.Attribute, searchString string) bool {
-	for _, attr := range attrs {
-		if aws.StringValue(attr.Name) == searchString {
-			return true
-		}
-	}
-	return false
+	fmt.Println("Instances ready for update: ", instancesToUpdate)
+	return nil
 }
