@@ -69,7 +69,7 @@ func _main() error {
 
 	// Make slice of Bottlerocket instances to use with SendCommand and checkCommandOutput
 	instances := make([]string, 0)
-	for instance, _ := range ec2IDtoECSARN {
+	for instance := range ec2IDtoECSARN {
 		instances = append(instances, instance)
 	}
 
