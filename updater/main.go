@@ -18,9 +18,15 @@ var (
 	flagRegion  = flag.String("region", "", "The AWS Region in which cluster is running.")
 )
 
+type updater struct {
+	cluster string
+	ecs     *ecs.ECS
+	ssm     *ssm.SSM
+}
+
 func main() {
 	if err := _main(); err != nil {
-		fmt.Fprintf(os.Stderr, err.Error())
+		log.Println(err.Error())
 		os.Exit(1)
 	}
 }
@@ -39,34 +45,57 @@ func _main() error {
 	sess := session.Must(session.NewSession(&aws.Config{
 		Region: aws.String(*flagRegion),
 	}))
-	ecsClient := ecs.New(sess)
-	ssmClient := ssm.New(sess, aws.NewConfig().WithLogLevel(aws.LogDebugWithHTTPBody))
 
-	instances, err := listContainerInstances(ecsClient, *flagCluster, pageSize)
+	u := &updater{
+		cluster: *flagCluster,
+		ecs:     ecs.New(sess, aws.NewConfig().WithLogLevel(aws.LogDebugWithHTTPBody)),
+		ssm:     ssm.New(sess, aws.NewConfig().WithLogLevel(aws.LogDebugWithHTTPBody)),
+	}
+
+	listedInstances, err := u.listContainerInstances()
 	if err != nil {
 		return err
 	}
 
-	bottlerocketInstances, err := filterBottlerocketInstances(ecsClient, *flagCluster, instances)
+	ec2IDtoECSARN, err := u.filterBottlerocketInstances(listedInstances)
 	if err != nil {
 		return err
 	}
 
-	if len(bottlerocketInstances) == 0 {
+	if len(ec2IDtoECSARN) == 0 {
 		log.Printf("No Bottlerocket instances detected")
 		return nil
 	}
 
-	commandID, err := sendCommand(ssmClient, bottlerocketInstances, "apiclient update check")
+	// Make slice of Bottlerocket instances to use with SendCommand and checkCommandOutput
+	instances := make([]string, 0)
+	for instance, _ := range ec2IDtoECSARN {
+		instances = append(instances, instance)
+	}
+
+	commandID, err := u.sendCommand(instances, "apiclient update check")
 	if err != nil {
 		return err
 	}
 
-	instancesToUpdate, err := checkCommandOutput(ssmClient, commandID, bottlerocketInstances)
+	candidates, err := u.checkSSMCommandOutput(commandID, instances)
 	if err != nil {
 		return err
 	}
 
-	fmt.Println("Instances ready for update: ", instancesToUpdate)
+	if len(candidates) == 0 {
+		log.Printf("No instances to update")
+		return nil
+	}
+	fmt.Println("Instances ready for update: ", candidates)
+
+	for ec2ID, containerInstance := range ec2IDtoECSARN {
+		err := u.drain(containerInstance)
+		if err != nil {
+			log.Printf("%#v", err)
+			continue
+		}
+		log.Printf("Instance %s drained", ec2ID)
+	}
 	return nil
 }
