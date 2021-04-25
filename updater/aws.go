@@ -16,6 +16,15 @@ const (
 	pageSize = 50
 )
 
+type ECSAPI interface {
+	ListContainerInstances(*ecs.ListContainerInstancesInput) (*ecs.ListContainerInstancesOutput, error)
+	DescribeContainerInstances(input *ecs.DescribeContainerInstancesInput) (*ecs.DescribeContainerInstancesOutput, error)
+	UpdateContainerInstancesState(input *ecs.UpdateContainerInstancesStateInput) (*ecs.UpdateContainerInstancesStateOutput, error)
+	ListTasks(input *ecs.ListTasksInput) (*ecs.ListTasksOutput, error)
+	DescribeTasks(input *ecs.DescribeTasksInput) (*ecs.DescribeTasksOutput, error)
+	WaitUntilTasksStopped(input *ecs.DescribeTasksInput) error
+}
+
 func (u *updater) listContainerInstances() ([]*string, error) {
 	resp, err := u.ecs.ListContainerInstances(&ecs.ListContainerInstancesInput{
 		Cluster:    &u.cluster,
