@@ -5,6 +5,8 @@ import (
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/ecs"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestFilterBottlerocketInstances(t *testing.T) {
@@ -53,21 +55,6 @@ func TestFilterBottlerocketInstances(t *testing.T) {
 		aws.String("ec2-id-not1"),
 		aws.String("ec2-id-not2"),
 	})
-	// can be simplified with require.NoError(t, err) if we add github.com/stretchr/testify
-	if err != nil {
-		t.Errorf("no error expected: %v", err)
-	}
-	// can be simplified with assert.EqualValues if we add github.com/stretchr/testify
-	for k, v := range actual {
-		if ev, ok := expected[k]; !ok {
-			t.Errorf("unexpected key %q", k)
-		} else if v != ev {
-			t.Errorf("wrong value for [%q]: %q instead of %q", k, v, ev)
-		}
-	}
-	for k := range expected {
-		if _, ok := actual[k]; !ok {
-			t.Errorf("missing key %q", k)
-		}
-	}
+	require.NoError(t, err)
+	assert.EqualValues(t, expected, actual)
 }
