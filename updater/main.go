@@ -20,7 +20,7 @@ var (
 
 type updater struct {
 	cluster string
-	ecs     *ecs.ECS
+	ecs     ECSAPI
 	ssm     *ssm.SSM
 }
 
