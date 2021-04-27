@@ -217,7 +217,7 @@ func (u *updater) checkSSMCommandOutput(commandID string, instanceIDs []string) 
 			InstanceId: aws.String(v),
 		})
 		if err != nil {
-			return nil, fmt.Errorf("failed to retreive command invocation output: %#v", err)
+			return nil, fmt.Errorf("failed to retrieve command invocation output: %#v", err)
 		}
 
 		type updateCheckResult struct {
