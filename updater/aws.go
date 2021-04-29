@@ -17,6 +17,11 @@ const (
 	pageSize = 50
 )
 
+type instance struct {
+	instanceID          string
+	containerInstanceID string
+}
+
 type ECSAPI interface {
 	ListContainerInstances(*ecs.ListContainerInstancesInput) (*ecs.ListContainerInstancesOutput, error)
 	DescribeContainerInstances(input *ecs.DescribeContainerInstancesInput) (*ecs.DescribeContainerInstancesOutput, error)
@@ -38,9 +43,9 @@ func (u *updater) listContainerInstances() ([]*string, error) {
 	return resp.ContainerInstanceArns, nil
 }
 
-// filterBottlerocketInstances returns a map of EC2 instance IDs to container instance ARNs
-// provided as input where the container instance is a Bottlerocket host.
-func (u *updater) filterBottlerocketInstances(instances []*string) (map[string]string, error) {
+// filterBottlerocketInstances filters container instances and returns list of
+// instances that are running Bottlerocket OS
+func (u *updater) filterBottlerocketInstances(instances []*string) ([]instance, error) {
 	resp, err := u.ecs.DescribeContainerInstances(&ecs.DescribeContainerInstancesInput{
 		Cluster:            &u.cluster,
 		ContainerInstances: instances,
@@ -49,15 +54,18 @@ func (u *updater) filterBottlerocketInstances(instances []*string) (map[string]s
 		return nil, fmt.Errorf("cannot describe container instances: %#v", err)
 	}
 
-	ec2IDtoECSARN := make(map[string]string)
-	// Check the DescribeInstances response for Bottlerocket nodes, add them to map if detected.
-	for _, instance := range resp.ContainerInstances {
-		if containsAttribute(instance.Attributes, "bottlerocket.variant") {
-			ec2IDtoECSARN[aws.StringValue(instance.Ec2InstanceId)] = aws.StringValue(instance.ContainerInstanceArn)
-			log.Printf("Bottlerocket instance detected. Instance %s added to check updates", aws.StringValue(instance.Ec2InstanceId))
+	bottlerocketInstances := make([]instance, 0)
+	// check the DescribeContainerInstances response and add only Bottlerocket instances to the list
+	for _, containerInstance := range resp.ContainerInstances {
+		if containsAttribute(containerInstance.Attributes, "bottlerocket.variant") {
+			bottlerocketInstances = append(bottlerocketInstances, instance{
+				instanceID:          aws.StringValue(containerInstance.Ec2InstanceId),
+				containerInstanceID: aws.StringValue(containerInstance.ContainerInstanceArn),
+			})
+			log.Printf("Bottlerocket instance detected. Instance %s added to check updates", aws.StringValue(containerInstance.Ec2InstanceId))
 		}
 	}
-	return ec2IDtoECSARN, nil
+	return bottlerocketInstances, nil
 }
 
 // containsAttribute checks if a slice of ECS Attributes struct contains a specified name.
@@ -68,6 +76,36 @@ func containsAttribute(attrs []*ecs.Attribute, searchString string) bool {
 		}
 	}
 	return false
+}
+
+// filterAvailableUpdates returns a list of instances that have updates available
+func (u *updater) filterAvailableUpdates(bottlerocketInstances []instance) ([]instance, error) {
+	// make slice of Bottlerocket instances to use with SendCommand and checkCommandOutput
+	instances := make([]string, 0)
+	for _, inst := range bottlerocketInstances {
+		instances = append(instances, inst.instanceID)
+	}
+
+	commandID, err := u.sendCommand(instances, "apiclient update check")
+	if err != nil {
+		return nil, err
+	}
+
+	candidates := make([]instance, 0)
+	for _, inst := range bottlerocketInstances {
+		commandOutput, err := u.getCommandResult(commandID, inst.instanceID)
+		if err != nil {
+			return nil, err
+		}
+		updateState, err := isUpdateAvailable(commandOutput)
+		if err != nil {
+			return nil, err
+		}
+		if updateState {
+			candidates = append(candidates, inst)
+		}
+	}
+	return candidates, nil
 }
 
 // drain drains eligible container instances. Container instances are eligible if all running

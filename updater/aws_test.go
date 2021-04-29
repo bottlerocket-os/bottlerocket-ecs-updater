@@ -37,9 +37,15 @@ func TestFilterBottlerocketInstances(t *testing.T) {
 			Ec2InstanceId:        aws.String("ec2-id-not2"),
 		}},
 	}
-	expected := map[string]string{
-		"ec2-id-br1": "cont-inst-br1",
-		"ec2-id-br2": "cont-inst-br2",
+	expected := []instance{
+		{
+			instanceID:          "ec2-id-br1",
+			containerInstanceID: "cont-inst-br1",
+		},
+		{
+			instanceID:          "ec2-id-br2",
+			containerInstanceID: "cont-inst-br2",
+		},
 	}
 
 	mockECS := MockECS{
