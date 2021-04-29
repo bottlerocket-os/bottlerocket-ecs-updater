@@ -47,11 +47,38 @@ Resources:
           PolicyDocument:
             Version: 2012-10-17
             Statement:
+              # Allows listing all container instances in a cluster
               - Effect: Allow
                 Action:
                   - 'ecs:ListContainerInstances'
                 Resource:
                   - !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:cluster/${ClusterName}'
+              # Allows describe container instances to get ec2 instance ID and ecs attributes to filter Bottlerocket instances
+              # Allows list tasks to filter instances running standalone tasks
+              # Allows update container instance state for draining
+              # Allows describe tasks to identify tasks not started by service
+              - Effect: Allow
+                Action:
+                  - 'ecs:DescribeContainerInstances'
+                  - 'ecs:ListTasks'
+                  - 'ecs:UpdateContainerInstancesState'
+                  - 'ecs:DescribeTasks'
+                Condition:
+                  ArnEquals:
+                    ecs:cluster: !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:cluster/${ClusterName}'
+              # Allows ssm send command to make Bottlerocket update API calls
+              - Effect: Allow
+                Action:
+                  - 'ssm:SendCommand'
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}::document/AWS-RunShellScript"
+                  - !Sub "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/*"
+              # Allows get command invocation to get Bottlerocket API calls output
+              - Effect: Allow
+                Action:
+                  - 'ssm:GetCommandInvocation'
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:*"
   UpdaterTaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Properties:
@@ -80,8 +107,8 @@ Resources:
     Type: AWS::Events::Rule
     Properties:
       Description: "Check for Bottlerocket updates on a schedule"
-      # Run Task every 5 minutes
-      ScheduleExpression: "cron(0/5 * * * ? *)"
+      # Run Task every 30 minutes
+      ScheduleExpression: "cron(0/30 * * * ? *)"
       State: 'ENABLED'
       Targets:
         - Id: ecs-updater-fargate-task
