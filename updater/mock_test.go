@@ -1,14 +1,18 @@
 package main
 
-import "github.com/aws/aws-sdk-go/service/ecs"
+import (
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/request"
+	"github.com/aws/aws-sdk-go/service/ecs"
+)
 
 type MockECS struct {
-	ListContainerInstancesFn        func(input *ecs.ListContainerInstancesInput) (*ecs.ListContainerInstancesOutput, error)
-	DescribeContainerInstancesFn    func(input *ecs.DescribeContainerInstancesInput) (*ecs.DescribeContainerInstancesOutput, error)
-	UpdateContainerInstancesStateFn func(input *ecs.UpdateContainerInstancesStateInput) (*ecs.UpdateContainerInstancesStateOutput, error)
-	ListTasksFn                     func(input *ecs.ListTasksInput) (*ecs.ListTasksOutput, error)
-	DescribeTasksFn                 func(input *ecs.DescribeTasksInput) (*ecs.DescribeTasksOutput, error)
-	WaitUntilTasksStoppedFn         func(input *ecs.DescribeTasksInput) error
+	ListContainerInstancesFn           func(input *ecs.ListContainerInstancesInput) (*ecs.ListContainerInstancesOutput, error)
+	DescribeContainerInstancesFn       func(input *ecs.DescribeContainerInstancesInput) (*ecs.DescribeContainerInstancesOutput, error)
+	UpdateContainerInstancesStateFn    func(input *ecs.UpdateContainerInstancesStateInput) (*ecs.UpdateContainerInstancesStateOutput, error)
+	ListTasksFn                        func(input *ecs.ListTasksInput) (*ecs.ListTasksOutput, error)
+	DescribeTasksFn                    func(input *ecs.DescribeTasksInput) (*ecs.DescribeTasksOutput, error)
+	WaitUntilTasksStoppedWithContextFn func(ctx aws.Context, input *ecs.DescribeTasksInput, opts ...request.WaiterOption) error
 }
 
 var _ ECSAPI = (*MockECS)(nil)
@@ -33,6 +37,6 @@ func (m MockECS) DescribeTasks(input *ecs.DescribeTasksInput) (*ecs.DescribeTask
 	return m.DescribeTasksFn(input)
 }
 
-func (m MockECS) WaitUntilTasksStopped(input *ecs.DescribeTasksInput) error {
-	return m.WaitUntilTasksStoppedFn(input)
+func (m MockECS) WaitUntilTasksStoppedWithContext(ctx aws.Context, input *ecs.DescribeTasksInput, opts ...request.WaiterOption) error {
+	return m.WaitUntilTasksStoppedWithContextFn(ctx, input, opts...)
 }

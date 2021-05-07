@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/request"
 	"github.com/aws/aws-sdk-go/service/ec2"
 	"github.com/aws/aws-sdk-go/service/ecs"
 	"github.com/aws/aws-sdk-go/service/ssm"
@@ -19,6 +20,8 @@ const (
 	updateStateStaged    = "Staged"
 	updateStateAvailable = "Available"
 	updateStateReady     = "Ready"
+	waiterDelay          = time.Duration(15) * time.Second
+	waiterMaxAttempts    = 100
 )
 
 type instance struct {
@@ -42,7 +45,7 @@ type ECSAPI interface {
 	UpdateContainerInstancesState(input *ecs.UpdateContainerInstancesStateInput) (*ecs.UpdateContainerInstancesStateOutput, error)
 	ListTasks(input *ecs.ListTasksInput) (*ecs.ListTasksOutput, error)
 	DescribeTasks(input *ecs.DescribeTasksInput) (*ecs.DescribeTasksOutput, error)
-	WaitUntilTasksStopped(input *ecs.DescribeTasksInput) error
+	WaitUntilTasksStoppedWithContext(ctx aws.Context, input *ecs.DescribeTasksInput, opts ...request.WaiterOption) error
 }
 
 func (u *updater) listContainerInstances() ([]*string, error) {
@@ -221,11 +224,14 @@ func (u *updater) waitUntilDrained(containerInstance string) error {
 		log.Printf("No tasks to drain")
 		return nil
 	}
-	// TODO Tune MaxAttempts
-	return u.ecs.WaitUntilTasksStopped(&ecs.DescribeTasksInput{
+
+	return u.ecs.WaitUntilTasksStoppedWithContext(aws.BackgroundContext(), &ecs.DescribeTasksInput{
 		Cluster: &u.cluster,
 		Tasks:   taskARNs,
-	})
+	},
+		request.WithWaiterMaxAttempts(waiterMaxAttempts),
+		request.WithWaiterDelay(request.ConstantWaiterDelay(waiterDelay)),
+	)
 }
 
 // updateInstance starts an update process on an instance.
@@ -336,13 +342,13 @@ func (u *updater) sendCommand(instanceIDs []string, ssmDocument string) (string,
 
 	commandID := *resp.Command.CommandId
 	// Wait for the sent commands to complete.
-	// TODO Update this to use WaitGroups
 	for _, v := range instanceIDs {
-		// TODO handle error
-		u.ssm.WaitUntilCommandExecuted(&ssm.GetCommandInvocationInput{
+		u.ssm.WaitUntilCommandExecutedWithContext(aws.BackgroundContext(), &ssm.GetCommandInvocationInput{
 			CommandId:  &commandID,
 			InstanceId: &v,
-		})
+		},
+			request.WithWaiterMaxAttempts(waiterMaxAttempts),
+			request.WithWaiterDelay(request.ConstantWaiterDelay(waiterDelay)))
 	}
 	log.Printf("SSM document %q posted with command id %q", ssmDocument, commandID)
 	return commandID, nil
