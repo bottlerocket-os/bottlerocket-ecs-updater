@@ -50,9 +50,9 @@ func _main() error {
 
 	u := &updater{
 		cluster: *flagCluster,
-		ecs:     ecs.New(sess, aws.NewConfig().WithLogLevel(aws.LogDebugWithHTTPBody)),
-		ssm:     ssm.New(sess, aws.NewConfig().WithLogLevel(aws.LogDebugWithHTTPBody)),
-		ec2:     ec2.New(sess, aws.NewConfig().WithLogLevel(aws.LogDebugWithHTTPBody)),
+		ecs:     ecs.New(sess, aws.NewConfig()),
+		ssm:     ssm.New(sess, aws.NewConfig()),
+		ec2:     ec2.New(sess, aws.NewConfig()),
 	}
 
 	listedInstances, err := u.listContainerInstances()
@@ -84,21 +84,30 @@ func _main() error {
 	log.Printf("Instances ready for update: %#q", candidates)
 
 	for _, i := range candidates {
-		err := u.drain(i.containerInstanceID)
+		eligible, err := u.eligible(i.containerInstanceID)
 		if err != nil {
-			log.Printf("%#v", err)
+			log.Printf("Failed to determine eligibility for update of instance %#q: %v", i, err)
 			continue
 		}
-		log.Printf("Instance %#q drained", i)
+		if !eligible {
+			log.Printf("Instance %#q is not eligible for updates", i)
+			continue
+		}
+		err = u.drainInstance(i.containerInstanceID)
+		if err != nil {
+			log.Printf("Failed to drain instance %#q: %v", i, err)
+			continue
+		}
+		log.Printf("Instance %#q successfully drained!", i)
 
 		ec2IDs := []string{i.instanceID}
 		_, err = u.sendCommand(ec2IDs, "apiclient update apply --reboot")
 		if err != nil {
 			// TODO add nuanced error checking to determine the type of failure, act accordingly.
 			log.Printf("%#v", err)
-			err2 := u.activateInstance(aws.String(i.containerInstanceID))
+			err2 := u.activateInstance(i.containerInstanceID)
 			if err2 != nil {
-				log.Printf("failed to reactivate %#q after failure to execute update command. Aborting update operations.", i)
+				log.Printf("failed to re-activate instance %#q after failure to execute update command. Aborting update operations.", i)
 				return err2
 			}
 			continue
@@ -109,7 +118,7 @@ func _main() error {
 			return fmt.Errorf("instance %#q failed to enter an Ok status after reboot. Aborting update operations: %#v", i, err)
 		}
 
-		err = u.activateInstance(aws.String(i.containerInstanceID))
+		err = u.activateInstance(i.containerInstanceID)
 		if err != nil {
 			log.Printf("instance %#q failed to return to ACTIVE after reboot. Aborting update operations.", i)
 			return err
