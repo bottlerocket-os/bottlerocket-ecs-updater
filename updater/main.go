@@ -60,65 +60,60 @@ func _main() error {
 		return err
 	}
 
-	ec2IDtoECSARN, err := u.filterBottlerocketInstances(listedInstances)
-	if err != nil {
-		return err
-	}
-
-	if len(ec2IDtoECSARN) == 0 {
-		log.Printf("No Bottlerocket instances detected")
+	if len(listedInstances) == 0 {
+		log.Print("No instances in the cluster")
 		return nil
 	}
 
-	// Make slice of Bottlerocket instances to use with SendCommand and checkCommandOutput
-	instances := make([]string, 0)
-	for instance := range ec2IDtoECSARN {
-		instances = append(instances, instance)
-	}
+	// Ensure listContainerInstances output is processed in batches of 50 or less as
+	// SSM SendCommand is limited to 50 instances at a time.
+	batch := 50
+	candidates := make([]instance, 0)
+	for start := 0; start < len(listedInstances); start += batch {
+		stop := start + batch
+		if stop > len(listedInstances) {
+			stop = len(listedInstances)
+		}
 
-	commandID, err := u.sendCommand(instances, "apiclient update check")
-	if err != nil {
-		return err
-	}
-
-	candidates := make([]string, 0)
-	for _, ec2ID := range instances {
-		commandOutput, err := u.getCommandResult(commandID, ec2ID)
+		bottlerocketInstances, err := u.filterBottlerocketInstances(listedInstances[start:stop])
 		if err != nil {
 			return err
 		}
 
-		updateState, err := isUpdateAvailable(commandOutput)
+		if len(bottlerocketInstances) == 0 {
+			log.Printf("No Bottlerocket instances detected")
+			return nil
+		}
+		updateCandidates, err := u.filterAvailableUpdates(bottlerocketInstances)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to check updates: %#v", err)
 		}
-
-		if updateState {
-			candidates = append(candidates, ec2ID)
-		}
+		candidates = append(candidates, updateCandidates...)
 	}
 	if len(candidates) == 0 {
 		log.Printf("No instances to update")
 		return nil
 	}
-	log.Print("Instances ready for update: ", candidates)
+	log.Printf("Instances ready for update: %#q", candidates)
 
-	for ec2ID, containerInstance := range ec2IDtoECSARN {
-		err := u.drain(containerInstance)
+	for _, inst := range candidates {
+		ec2ID := inst.instanceID
+		containerInstanceID := inst.containerInstanceID
+		err := u.drain(containerInstanceID)
 		if err != nil {
 			log.Printf("%#v", err)
 			continue
 		}
-		log.Printf("Instance %s drained", ec2ID)
+		log.Printf("Instance %#q drained", inst)
 
 		ec2IDs := []string{ec2ID}
 		_, err = u.sendCommand(ec2IDs, "apiclient update apply --reboot")
 		if err != nil {
 			// TODO add nuanced error checking to determine the type of failure, act accordingly.
 			log.Printf("%#v", err)
-			err2 := u.activateInstance(aws.String(containerInstance))
+			err2 := u.activateInstance(aws.String(containerInstanceID))
 			if err2 != nil {
-				log.Printf("failed to reactivate %s after failure to execute update command. Aborting update operations.", ec2ID)
+				log.Printf("failed to reactivate %#q after failure to execute update command. Aborting update operations.", inst)
 				return err2
 			}
 			continue
@@ -126,12 +121,12 @@ func _main() error {
 
 		err = u.waitUntilOk(ec2ID)
 		if err != nil {
-			return fmt.Errorf("instance %s failed to enter an Ok status after reboot. Aborting update operations: %#v", ec2ID, err)
+			return fmt.Errorf("instance %#q failed to enter an Ok status after reboot. Aborting update operations: %#v", inst, err)
 		}
 
-		err = u.activateInstance(aws.String(containerInstance))
+		err = u.activateInstance(aws.String(containerInstanceID))
 		if err != nil {
-			log.Printf("instance %s failed to return to ACTIVE after reboot. Aborting update operations.", ec2ID)
+			log.Printf("instance %#q failed to return to ACTIVE after reboot. Aborting update operations.", inst)
 			return err
 		}
 
@@ -146,19 +141,18 @@ func _main() error {
 			log.Printf("%#v", err)
 			continue
 		}
-
 		// TODO  version before and after comparison.
 		updateState, err := isUpdateAvailable(updateResult)
 		if err != nil {
-			log.Printf("Unable to determine update result. Manual verification of %s required", ec2ID)
+			log.Printf("Unable to determine update result. Manual verification of %#q required", inst)
 			continue
 		}
 
 		if updateState {
-			log.Printf("Instance %s did not update. Manual update advised.", ec2ID)
+			log.Printf("Instance %#q did not update. Manual update advised.", inst)
 			continue
 		} else {
-			log.Printf("Instance %s updated successfully", ec2ID)
+			log.Printf("Instance %#q updated successfully", inst)
 		}
 
 		updatedVersion, err := getActiveVersion(updateResult)
@@ -166,9 +160,9 @@ func _main() error {
 			log.Printf("%#v", err)
 		}
 		if len(updatedVersion) != 0 {
-			log.Printf("Instance %s running Bottlerocket: %s", ec2ID, updatedVersion)
+			log.Printf("Instance %#q running Bottlerocket: %s", inst, updatedVersion)
 		} else {
-			log.Printf("Unable to verify active version. Manual verification of %s required.", ec2ID)
+			log.Printf("Unable to verify active version. Manual verification of %#q required.", inst)
 		}
 	}
 	return nil

@@ -9,6 +9,46 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestListContainerInstances(t *testing.T) {
+	output := &ecs.ListContainerInstancesOutput{
+		ContainerInstanceArns: []*string{
+			aws.String("cont-inst-arn1"),
+			aws.String("cont-inst-arn2"),
+			aws.String("cont-inst-arn3")},
+		NextToken: aws.String("token"),
+	}
+	output2 := &ecs.ListContainerInstancesOutput{
+		ContainerInstanceArns: []*string{
+			aws.String("cont-inst-arn4"),
+			aws.String("cont-inst-arn5"),
+			aws.String("cont-inst-arn6")},
+		NextToken: nil,
+	}
+	expected := []*string{
+		aws.String("cont-inst-arn1"),
+		aws.String("cont-inst-arn2"),
+		aws.String("cont-inst-arn3"),
+		aws.String("cont-inst-arn4"),
+		aws.String("cont-inst-arn5"),
+		aws.String("cont-inst-arn6")}
+
+	mockECS := MockECS{
+		ListContainerInstancesPagesFn: func(_ *ecs.ListContainerInstancesInput, fn func(*ecs.ListContainerInstancesOutput, bool) bool) error {
+			fn(output, true)
+			fn(output2, false)
+			return nil
+		},
+		ListContainerInstancesFn: func(_ *ecs.ListContainerInstancesInput) (*ecs.ListContainerInstancesOutput, error) {
+			return output, nil
+		},
+	}
+	u := updater{ecs: mockECS}
+
+	actual, err := u.listContainerInstances()
+	require.NoError(t, err)
+	assert.EqualValues(t, expected, actual)
+}
+
 func TestFilterBottlerocketInstances(t *testing.T) {
 	output := &ecs.DescribeContainerInstancesOutput{
 		ContainerInstances: []*ecs.ContainerInstance{{
@@ -37,9 +77,15 @@ func TestFilterBottlerocketInstances(t *testing.T) {
 			Ec2InstanceId:        aws.String("ec2-id-not2"),
 		}},
 	}
-	expected := map[string]string{
-		"ec2-id-br1": "cont-inst-br1",
-		"ec2-id-br2": "cont-inst-br2",
+	expected := []instance{
+		{
+			instanceID:          "ec2-id-br1",
+			containerInstanceID: "cont-inst-br1",
+		},
+		{
+			instanceID:          "ec2-id-br2",
+			containerInstanceID: "cont-inst-br2",
+		},
 	}
 
 	mockECS := MockECS{
