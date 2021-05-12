@@ -115,13 +115,12 @@ func _main() error {
 
 		err = u.waitUntilOk(i.instanceID)
 		if err != nil {
-			return fmt.Errorf("instance %#q failed to enter an Ok status after reboot. Aborting update operations: %#v", i, err)
+			log.Printf("Instance %#q failed to enter an Ok status after reboot: %v", i, err)
 		}
 
 		err = u.activateInstance(i.containerInstanceID)
 		if err != nil {
-			log.Printf("instance %#q failed to return to ACTIVE after reboot. Aborting update operations.", i)
-			return err
+			return fmt.Errorf("instance %#q failed to return to ACTIVE after reboot. Aborting update operations", i)
 		}
 
 		updateStatus, err := u.sendCommand(ec2IDs, "apiclient update check")
