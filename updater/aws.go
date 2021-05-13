@@ -209,6 +209,56 @@ func (u *updater) waitUntilDrained(containerInstance string) error {
 	})
 }
 
+// updateInstance starts an update process on an instance.
+func (u *updater) updateInstance(inst instance) error {
+	log.Printf("Starting update on instance %#q", inst)
+	ec2IDs := []string{inst.instanceID}
+	_, err := u.sendCommand(ec2IDs, "apiclient update apply --reboot")
+	if err != nil {
+		return fmt.Errorf("error in sending update command: %w", err)
+	}
+
+	err = u.waitUntilOk(inst.instanceID)
+	if err != nil {
+		return fmt.Errorf("failed to reach Ok status after reboot: %w", err)
+	}
+	return nil
+}
+
+// verifyUpdate verifies if instance was properly updated
+func (u *updater) verifyUpdate(inst instance) error {
+	log.Println("Verifying update by checking there is no new version available to update" +
+		" and validate the active version")
+	ec2IDs := []string{inst.instanceID}
+	updateStatus, err := u.sendCommand(ec2IDs, "apiclient update check")
+	if err != nil {
+		return fmt.Errorf("failed to send update check command : %v", err)
+	}
+
+	updateResult, err := u.getCommandResult(updateStatus, inst.instanceID)
+	if err != nil {
+		return fmt.Errorf("failed to get check command output: %w", err)
+	}
+	updateAvailable, err := isUpdateAvailable(updateResult)
+	if err != nil {
+		return fmt.Errorf("unable to determine update result, manual verification required: %v", err)
+	}
+	if updateAvailable {
+		return fmt.Errorf(" instance did not update, manual update advised")
+	}
+	log.Printf("Instance %#q updated successfully", inst)
+	updatedVersion, err := getActiveVersion(updateResult)
+	if err != nil {
+		log.Printf("failed to get active version: %v", err)
+	}
+	if len(updatedVersion) != 0 {
+		log.Printf("Instance %#q running Bottlerocket: %s", inst, updatedVersion)
+	} else {
+		log.Printf("Unable to verify active version. Manual verification of %#q required.", inst)
+	}
+	return nil
+}
+
 func (u *updater) sendCommand(instanceIDs []string, ssmCommand string) (string, error) {
 	log.Printf("Sending SSM command %q", ssmCommand)
 	resp, err := u.ssm.SendCommand(&ssm.SendCommandInput{
