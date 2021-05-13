@@ -19,6 +19,7 @@ const (
 type instance struct {
 	instanceID          string
 	containerInstanceID string
+	bottlerocketVersion string
 }
 
 type checkOutput struct {
@@ -112,6 +113,7 @@ func (u *updater) filterAvailableUpdates(bottlerocketInstances []instance) ([]in
 			continue
 		}
 		if output.UpdateState == "Available" {
+			inst.bottlerocketVersion = output.ActivePartition.Image.Version
 			candidates = append(candidates, inst)
 		}
 	}
@@ -237,33 +239,36 @@ func (u *updater) updateInstance(inst instance) error {
 }
 
 // verifyUpdate verifies if instance was properly updated
-func (u *updater) verifyUpdate(inst instance) error {
+func (u *updater) verifyUpdate(inst instance) (bool, error) {
 	log.Println("Verifying update by checking there is no new version available to update" +
 		" and validate the active version")
 	ec2IDs := []string{inst.instanceID}
 	updateStatus, err := u.sendCommand(ec2IDs, "apiclient update check")
 	if err != nil {
-		return fmt.Errorf("failed to send update check command : %v", err)
+		return false, fmt.Errorf("failed to send update check command: %v", err)
 	}
 
 	updateResult, err := u.getCommandResult(updateStatus, inst.instanceID)
 	if err != nil {
-		return fmt.Errorf("failed to get check command output: %w", err)
+		return false, fmt.Errorf("failed to get check command output: %w", err)
 	}
 	output, err := parseCommandOutput(updateResult)
 	if err != nil {
-		return fmt.Errorf("failed to parse command output %s, manual verification required: %w", string(updateResult), err)
+		return false, fmt.Errorf("failed to parse command output %s, manual verification required: %w", string(updateResult), err)
 	}
-	if output.UpdateState == "Available" {
-		return fmt.Errorf(" instance did not update, manual update advised")
-	}
-	log.Printf("Instance %#q updated successfully", inst)
-	if output.ActivePartition.Image.Version != "" {
-		log.Printf("Instance %#q running Bottlerocket: %s", inst, output.ActivePartition.Image.Version)
+	updatedVersion := output.ActivePartition.Image.Version
+	if updatedVersion == inst.bottlerocketVersion {
+		log.Printf("Container instance %q did not update, its current "+
+			"version %s and updated version %s are the same", inst.containerInstanceID, inst.bottlerocketVersion, updatedVersion)
+		return false, nil
+	} else if output.UpdateState == "Available" {
+		log.Printf("Container instance %q was updated to version %q successfully, however another newer version was recently released;"+
+			" Instance will be updated to newer version in next iteration.", inst.containerInstanceID, updatedVersion)
+		return true, nil
 	} else {
-		log.Printf("Unable to verify active version. Manual verification of %#q required.", inst)
+		log.Printf("Container instance %q updated to version %q", inst.containerInstanceID, updatedVersion)
 	}
-	return nil
+	return true, nil
 }
 
 func (u *updater) sendCommand(instanceIDs []string, ssmCommand string) (string, error) {

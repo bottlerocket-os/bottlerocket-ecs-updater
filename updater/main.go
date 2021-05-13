@@ -112,9 +112,14 @@ func _main() error {
 			return fmt.Errorf("instance %#q failed to re-activate after update: %w", i, activateErr)
 		}
 
-		err = u.verifyUpdate(i)
+		ok, err := u.verifyUpdate(i)
 		if err != nil {
 			log.Printf("Failed to verify update for instance %#q: %v", i, err)
+		}
+		if !ok {
+			log.Printf("Update failed for instance %#q", i)
+		} else {
+			log.Printf("Instance %#q updated successfully!", i)
 		}
 	}
 	return nil
