@@ -21,6 +21,15 @@ type instance struct {
 	containerInstanceID string
 }
 
+type checkOutput struct {
+	UpdateState     string `json:"update_state"`
+	ActivePartition struct {
+		Image struct {
+			Version string `json:"version"`
+		} `json:"image"`
+	} `json:"active_partition"`
+}
+
 type ECSAPI interface {
 	ListContainerInstances(*ecs.ListContainerInstancesInput) (*ecs.ListContainerInstancesOutput, error)
 	DescribeContainerInstances(input *ecs.DescribeContainerInstancesInput) (*ecs.DescribeContainerInstancesOutput, error)
@@ -96,11 +105,13 @@ func (u *updater) filterAvailableUpdates(bottlerocketInstances []instance) ([]in
 		if err != nil {
 			return nil, err
 		}
-		updateState, err := isUpdateAvailable(commandOutput)
+		output, err := parseCommandOutput(commandOutput)
 		if err != nil {
-			return nil, err
+			// not a fatal error, we can continue checking other instances.
+			log.Printf("Failed to parse command output %s: %v", string(commandOutput), err)
+			continue
 		}
-		if updateState {
+		if output.UpdateState == "Available" {
 			candidates = append(candidates, inst)
 		}
 	}
@@ -239,20 +250,16 @@ func (u *updater) verifyUpdate(inst instance) error {
 	if err != nil {
 		return fmt.Errorf("failed to get check command output: %w", err)
 	}
-	updateAvailable, err := isUpdateAvailable(updateResult)
+	output, err := parseCommandOutput(updateResult)
 	if err != nil {
-		return fmt.Errorf("unable to determine update result, manual verification required: %v", err)
+		return fmt.Errorf("failed to parse command output %s, manual verification required: %w", string(updateResult), err)
 	}
-	if updateAvailable {
+	if output.UpdateState == "Available" {
 		return fmt.Errorf(" instance did not update, manual update advised")
 	}
 	log.Printf("Instance %#q updated successfully", inst)
-	updatedVersion, err := getActiveVersion(updateResult)
-	if err != nil {
-		log.Printf("failed to get active version: %v", err)
-	}
-	if len(updatedVersion) != 0 {
-		log.Printf("Instance %#q running Bottlerocket: %s", inst, updatedVersion)
+	if output.ActivePartition.Image.Version != "" {
+		log.Printf("Instance %#q running Bottlerocket: %s", inst, output.ActivePartition.Image.Version)
 	} else {
 		log.Printf("Unable to verify active version. Manual verification of %#q required.", inst)
 	}
@@ -299,47 +306,22 @@ func (u *updater) getCommandResult(commandID string, instanceID string) ([]byte,
 	return commandResults, nil
 }
 
-func isUpdateAvailable(commandOutput []byte) (bool, error) {
-	type updateCheckResult struct {
-		UpdateState string `json:"update_state"`
-	}
-
-	var updateState updateCheckResult
-	err := json.Unmarshal(commandOutput, &updateState)
-	if err != nil {
-		return false, fmt.Errorf("failed to unmarshal update state: %#v", err)
-	}
-	return updateState.UpdateState == "Available", nil
-}
-
-// getActiveVersion unmarshals GetCommandInvocation output to determine the active version of a Bottlerocket instance.
-// Takes GetCommandInvocation output as a parameter and returns the active version in use.
-func getActiveVersion(commandOutput []byte) (string, error) {
-	type version struct {
-		Version string `json:"version"`
-	}
-
-	type image struct {
-		Image version `json:"image"`
-	}
-
-	type partition struct {
-		ActivePartition image `json:"active_partition"`
-	}
-
-	var activeVersion partition
-	err := json.Unmarshal(commandOutput, &activeVersion)
-	if err != nil {
-		log.Printf("failed to unmarshal command invocation output: %#v", err)
-		return "", err
-	}
-	versionInUse := activeVersion.ActivePartition.Image.Version
-	return versionInUse, nil
-}
-
 // waitUntilOk takes an EC2 ID as a parameter and waits until the specified EC2 instance is in an Ok status.
 func (u *updater) waitUntilOk(ec2ID string) error {
 	return u.ec2.WaitUntilInstanceStatusOk(&ec2.DescribeInstanceStatusInput{
 		InstanceIds: []*string{aws.String(ec2ID)},
 	})
+}
+
+// parseCommandOutput takes raw bytes of ssm command output and converts it into a struct
+func parseCommandOutput(commandOutput []byte) (checkOutput, error) {
+	output := checkOutput{}
+	err := json.Unmarshal(commandOutput, &output)
+	if err != nil {
+		return output, fmt.Errorf("failed to unmarshal json: %w", err)
+	}
+	if output.UpdateState == "" || output.ActivePartition.Image.Version == "" {
+		return output, fmt.Errorf("mandatory fields are not available")
+	}
+	return output, nil
 }
