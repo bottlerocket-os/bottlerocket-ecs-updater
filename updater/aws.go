@@ -48,6 +48,16 @@ type ECSAPI interface {
 	WaitUntilTasksStoppedWithContext(ctx aws.Context, input *ecs.DescribeTasksInput, opts ...request.WaiterOption) error
 }
 
+type SSMAPI interface {
+	SendCommand(input *ssm.SendCommandInput) (*ssm.SendCommandOutput, error)
+	GetCommandInvocation(input *ssm.GetCommandInvocationInput) (*ssm.GetCommandInvocationOutput, error)
+	WaitUntilCommandExecutedWithContext(ctx aws.Context, input *ssm.GetCommandInvocationInput, opts ...request.WaiterOption) error
+}
+
+type EC2API interface {
+	WaitUntilInstanceStatusOk(input *ec2.DescribeInstanceStatusInput) error
+}
+
 func (u *updater) listContainerInstances() ([]*string, error) {
 	resp, err := u.ecs.ListContainerInstances(&ecs.ListContainerInstancesInput{
 		Cluster:    &u.cluster,
