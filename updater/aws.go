@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -108,29 +107,19 @@ func (u *updater) filterAvailableUpdates(bottlerocketInstances []instance) ([]in
 	return candidates, nil
 }
 
-// drain drains eligible container instances. Container instances are eligible if all running
-// tasks were started by a service, or if there are no running tasks.
-func (u *updater) drain(containerInstance string) error {
-	if !u.eligible(&containerInstance) {
-		return errors.New("ineligible for updates")
-	}
-	return u.drainInstance(aws.String(containerInstance))
-}
-
-func (u *updater) eligible(containerInstance *string) bool {
+// eligible checks the eligibility of container instance for update. It's eligible
+// if all the running tasks were started by a service.
+func (u *updater) eligible(containerInstance string) (bool, error) {
 	list, err := u.ecs.ListTasks(&ecs.ListTasksInput{
 		Cluster:           &u.cluster,
-		ContainerInstance: containerInstance,
+		ContainerInstance: aws.String(containerInstance),
 	})
 	if err != nil {
-		log.Printf("failed to list tasks for container instance %s: %#v",
-			aws.StringValue(containerInstance), err)
-		return false
+		return false, fmt.Errorf("failed to list tasks: %w", err)
 	}
-
 	taskARNs := list.TaskArns
 	if len(list.TaskArns) == 0 {
-		return true
+		return true, nil
 	}
 
 	desc, err := u.ecs.DescribeTasks(&ecs.DescribeTasksInput{
@@ -138,63 +127,64 @@ func (u *updater) eligible(containerInstance *string) bool {
 		Tasks:   taskARNs,
 	})
 	if err != nil {
-		log.Printf("Could not describe tasks")
-		return false
+		return false, fmt.Errorf("could not describe tasks: %w", err)
 	}
-
 	for _, listResult := range desc.Tasks {
 		startedBy := aws.StringValue(listResult.StartedBy)
 		if !strings.HasPrefix(startedBy, "ecs-svc/") {
-			return false
+			return false, nil
 		}
 	}
-	return true
+	return true, nil
 }
 
-func (u *updater) drainInstance(containerInstance *string) error {
+func (u *updater) drainInstance(containerInstance string) error {
+	log.Printf("Starting drain on container instance %q", containerInstance)
 	resp, err := u.ecs.UpdateContainerInstancesState(&ecs.UpdateContainerInstancesStateInput{
 		Cluster:            &u.cluster,
-		ContainerInstances: []*string{containerInstance},
+		ContainerInstances: aws.StringSlice([]string{containerInstance}),
 		Status:             aws.String("DRAINING"),
 	})
 	if err != nil {
-		log.Printf("failed to update container instance %s state to DRAINING: %#v", aws.StringValue(containerInstance), err)
-		return err
+		return fmt.Errorf("failed to change instance state to DRAINING: %w", err)
 	}
 	if len(resp.Failures) != 0 {
+		log.Printf("There are API failures in draining the container instance %q, therefore attempting to"+
+			" re-activate", containerInstance)
 		err = u.activateInstance(containerInstance)
 		if err != nil {
-			log.Printf("instance failed to reactivate after failing to drain: %#v", err)
+			log.Printf("Instance failed to re-activate after failing to change state to DRAINING: %v", err)
 		}
-		return fmt.Errorf("Container instance %s failed to drain: %#v", aws.StringValue(containerInstance), resp.Failures)
+		return fmt.Errorf("failures in API call: %v", resp.Failures)
 	}
 	log.Printf("Container instance state changed to DRAINING")
 
-	err = u.waitUntilDrained(aws.StringValue(containerInstance))
+	err = u.waitUntilDrained(containerInstance)
 	if err != nil {
+		log.Printf("Container instance %q failed to drain, therefore attempting to re-activate", containerInstance)
 		err2 := u.activateInstance(containerInstance)
 		if err2 != nil {
-			log.Printf("failed to reactivate %s: %s", aws.StringValue(containerInstance), err2.Error())
+			log.Printf("Instance failed to re-activate after failing to wait for drain to complete: %v", err2)
 		}
-		return err
+		return fmt.Errorf("error while waiting to drain: %w", err)
 	}
+	log.Printf("Container instance %q drained successfully!", containerInstance)
 	return nil
 }
 
-func (u *updater) activateInstance(containerInstance *string) error {
+func (u *updater) activateInstance(containerInstance string) error {
 	resp, err := u.ecs.UpdateContainerInstancesState(&ecs.UpdateContainerInstancesStateInput{
 		Cluster:            &u.cluster,
-		ContainerInstances: []*string{containerInstance},
+		ContainerInstances: aws.StringSlice([]string{containerInstance}),
 		Status:             aws.String("ACTIVE"),
 	})
 	if err != nil {
-		log.Printf("failed to update container %s instance state to ACTIVE: %#v", aws.StringValue(containerInstance), err)
-		return err
+		return fmt.Errorf("failed to change state to ACTIVE: %w", err)
 	}
 	if len(resp.Failures) != 0 {
-		return fmt.Errorf("Container instance %s failed to activate: %#v", aws.StringValue(containerInstance), resp.Failures)
+		return fmt.Errorf("API failures while activating: %v", resp.Failures)
 	}
-	log.Printf("Container instance %s state changed to ACTIVE", aws.StringValue(containerInstance))
+	log.Printf("Container instance %q state changed to ACTIVE successfully!", containerInstance)
 	return nil
 }
 
@@ -204,13 +194,12 @@ func (u *updater) waitUntilDrained(containerInstance string) error {
 		ContainerInstance: aws.String(containerInstance),
 	})
 	if err != nil {
-		log.Printf("failed to identify a task to wait on")
-		return err
+		return fmt.Errorf("failed to list tasks: %w", err)
 	}
-
 	taskARNs := list.TaskArns
 
 	if len(taskARNs) == 0 {
+		log.Printf("No tasks to drain")
 		return nil
 	}
 	// TODO Tune MaxAttempts
@@ -221,8 +210,7 @@ func (u *updater) waitUntilDrained(containerInstance string) error {
 }
 
 func (u *updater) sendCommand(instanceIDs []string, ssmCommand string) (string, error) {
-	log.Printf("Checking InstanceIDs: %q", instanceIDs)
-
+	log.Printf("Sending SSM command %q", ssmCommand)
 	resp, err := u.ssm.SendCommand(&ssm.SendCommandInput{
 		DocumentName:    aws.String("AWS-RunShellScript"),
 		DocumentVersion: aws.String("$DEFAULT"),
@@ -232,19 +220,20 @@ func (u *updater) sendCommand(instanceIDs []string, ssmCommand string) (string, 
 		},
 	})
 	if err != nil {
-		return "", fmt.Errorf("command invocation failed: %#v", err)
+		return "", fmt.Errorf("send command failed: %w", err)
 	}
 
 	commandID := *resp.Command.CommandId
 	// Wait for the sent commands to complete.
 	// TODO Update this to use WaitGroups
 	for _, v := range instanceIDs {
+		// TODO handle error
 		u.ssm.WaitUntilCommandExecuted(&ssm.GetCommandInvocationInput{
 			CommandId:  &commandID,
 			InstanceId: &v,
 		})
 	}
-	log.Printf("CommandID: %s", commandID)
+	log.Printf("SSM command %q posted with command id %q", ssmCommand, commandID)
 	return commandID, nil
 }
 
@@ -254,7 +243,7 @@ func (u *updater) getCommandResult(commandID string, instanceID string) ([]byte,
 		InstanceId: aws.String(instanceID),
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to retrieve command invocation output: %#v", err)
+		return nil, fmt.Errorf("failed to retrieve command invocation output: %w", err)
 	}
 	commandResults := []byte(aws.StringValue(resp.StandardOutputContent))
 	return commandResults, nil
