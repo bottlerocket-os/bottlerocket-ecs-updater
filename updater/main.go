@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
@@ -124,6 +125,9 @@ func _main() error {
 			return fmt.Errorf("instance %#q failed to re-activate after update: %w", i, activateErr)
 		}
 
+		// Reboots are not immediate, and initiating an SSM command races with reboot. Add some
+		// sleep time to allow the reboot to progress before we verify update.
+		time.Sleep(20 * time.Second)
 		ok, err := u.verifyUpdate(i)
 		if err != nil {
 			log.Printf("Failed to verify update for instance %#q: %v", i, err)
