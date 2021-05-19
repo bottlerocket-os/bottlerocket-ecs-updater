@@ -20,15 +20,17 @@ var (
 	flagRegion  = flag.String("region", "", "The AWS Region in which cluster is running.")
 	flagCheck   = flag.String("check-document", "", "The SSM document name for checking available updates.")
 	flagApply   = flag.String("apply-document", "", "The SSM document name for applying updates.")
+	flagReboot  = flag.String("reboot-document", "", "The SSM document name to initiate a reboot.")
 )
 
 type updater struct {
-	cluster       string
-	checkDocument string
-	applyDocument string
-	ecs           ECSAPI
-	ssm           *ssm.SSM
-	ec2           *ec2.EC2
+	cluster        string
+	checkDocument  string
+	applyDocument  string
+	rebootDocument string
+	ecs            ECSAPI
+	ssm            *ssm.SSM
+	ec2            *ec2.EC2
 }
 
 func main() {
@@ -53,6 +55,9 @@ func _main() error {
 	case *flagApply == "":
 		flag.Usage()
 		return errors.New("apply-document is required")
+	case *flagReboot == "":
+		flag.Usage()
+		return errors.New("reboot-document is required")
 	}
 
 	sess := session.Must(session.NewSession(&aws.Config{
@@ -60,12 +65,13 @@ func _main() error {
 	}))
 
 	u := &updater{
-		cluster:       *flagCluster,
-		checkDocument: *flagCheck,
-		applyDocument: *flagApply,
-		ecs:           ecs.New(sess, aws.NewConfig()),
-		ssm:           ssm.New(sess, aws.NewConfig()),
-		ec2:           ec2.New(sess, aws.NewConfig()),
+		cluster:        *flagCluster,
+		checkDocument:  *flagCheck,
+		applyDocument:  *flagApply,
+		rebootDocument: *flagReboot,
+		ecs:            ecs.New(sess, aws.NewConfig()),
+		ssm:            ssm.New(sess, aws.NewConfig()),
+		ec2:            ec2.New(sess, aws.NewConfig()),
 	}
 
 	listedInstances, err := u.listContainerInstances()
