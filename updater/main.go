@@ -22,7 +22,7 @@ var (
 type updater struct {
 	cluster string
 	ecs     ECSAPI
-	ssm     *ssm.SSM
+	ssm     SSMAPI
 	ec2     *ec2.EC2
 }
 

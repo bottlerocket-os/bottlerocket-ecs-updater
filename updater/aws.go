@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/ec2"
@@ -26,7 +27,14 @@ type ECSAPI interface {
 	WaitUntilTasksStopped(input *ecs.DescribeTasksInput) error
 }
 
+type SSMAPI interface {
+	WaitUntilCommandExecuted(input *ssm.GetCommandInvocationInput) error
+	SendCommand(input *ssm.SendCommandInput) (*ssm.SendCommandOutput, error)
+	GetCommandInvocation(input *ssm.GetCommandInvocationInput) (*ssm.GetCommandInvocationOutput, error)
+}
+
 const ecsPageSize = 100
+const ssmPageSzie = 50
 
 func (u *updater) listContainerInstances() ([]*string, error) {
 	containerInstances := make([]*string, 0)
@@ -241,6 +249,8 @@ func (u *updater) waitUntilDrained(containerInstance string) error {
 
 func (u *updater) sendCommand(instanceIDs []string, ssmCommand string) (string, error) {
 	log.Printf("Sending SSM command %q", ssmCommand)
+
+	instanceCount := len(instanceIDs)
 	resp, err := u.ssm.SendCommand(&ssm.SendCommandInput{
 		DocumentName:    aws.String("AWS-RunShellScript"),
 		DocumentVersion: aws.String("$DEFAULT"),
@@ -252,18 +262,37 @@ func (u *updater) sendCommand(instanceIDs []string, ssmCommand string) (string, 
 	if err != nil {
 		return "", fmt.Errorf("send command failed: %w", err)
 	}
-
 	commandID := *resp.Command.CommandId
 	// Wait for the sent commands to complete.
-	// TODO Update this to use WaitGroups
+	wg := sync.WaitGroup{}
+	errChan := make(chan error, instanceCount)
 	for _, v := range instanceIDs {
-		// TODO handle error
-		u.ssm.WaitUntilCommandExecuted(&ssm.GetCommandInvocationInput{
-			CommandId:  &commandID,
-			InstanceId: &v,
-		})
+		wg.Add(1)
+		go func(instanceID string) {
+			defer wg.Done()
+			err := u.ssm.WaitUntilCommandExecuted(&ssm.GetCommandInvocationInput{
+				CommandId:  aws.String(commandID),
+				InstanceId: aws.String(instanceID),
+			})
+			if err != nil {
+				errChan <- fmt.Errorf("error while waiting on command execution %w", err)
+			}
+		}(aws.StringValue(&v))
 	}
-	log.Printf("SSM command %q posted with command id %q", ssmCommand, commandID)
+	wg.Wait()
+	close(errChan)
+
+	errCount := 0
+	for err = range errChan {
+		errCount++
+		if errCount == instanceCount {
+			return "", fmt.Errorf("too many failures while awaiting SSM Command execution: %w", err)
+		} else if err != nil {
+			log.Printf("%v", err)
+		}
+	}
+
+	log.Printf("CommandID: %s", commandID)
 	return commandID, nil
 }
 

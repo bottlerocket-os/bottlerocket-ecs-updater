@@ -7,9 +7,63 @@ import (
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/ecs"
+	"github.com/aws/aws-sdk-go/service/ssm"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestSendCommand(t *testing.T) {
+	cases := []struct {
+		name          string
+		sendOutput    *ssm.SendCommandOutput
+		sendError     error
+		expectedError string
+		expectedOut   string
+		waitError     error
+	}{
+		{
+			name: "send success",
+			sendOutput: &ssm.SendCommandOutput{
+				Command: &ssm.Command{CommandId: aws.String("id1")},
+			},
+			expectedOut: "id1",
+		},
+		{
+			name:          "send fail",
+			sendError:     errors.New("failed to send command"),
+			expectedError: "send command failed",
+		},
+		{
+			name: "wait failure",
+			sendOutput: &ssm.SendCommandOutput{
+				Command: &ssm.Command{CommandId: aws.String("")},
+			},
+			waitError:     errors.New("exceeded max attempts"),
+			expectedError: "too many failures while awaiting SSM Command execution",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mockSSM := &MockSSM{
+				SendCommandFn: func(_ *ssm.SendCommandInput) (*ssm.SendCommandOutput, error) {
+					return tc.sendOutput, tc.sendError
+				},
+				WaitUntilCommandExecutedFn: func(_ *ssm.GetCommandInvocationInput) error {
+					return tc.waitError
+				},
+			}
+			u := &updater{ssm: mockSSM}
+			actual, err := u.sendCommand([]string{"inst-id-1", "inst-id-2", "inst-id-3"}, "run me")
+			if tc.expectedError != "" && tc.sendError != nil {
+				assert.EqualError(t, err, fmt.Sprintf("%s: %v", tc.expectedError, tc.sendError))
+			} else if tc.expectedError != "" && tc.waitError != nil {
+				assert.EqualError(t, err, fmt.Sprintf("%s: error while waiting on command execution %v", tc.expectedError, tc.waitError))
+			} else {
+				assert.EqualValues(t, tc.expectedOut, actual)
+			}
+		})
+	}
+}
 
 func TestListContainerInstances(t *testing.T) {
 	cases := []struct {

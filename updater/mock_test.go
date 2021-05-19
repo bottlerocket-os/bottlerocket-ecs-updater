@@ -2,6 +2,7 @@ package main
 
 import (
 	"github.com/aws/aws-sdk-go/service/ecs"
+	"github.com/aws/aws-sdk-go/service/ssm"
 )
 
 type MockECS struct {
@@ -13,6 +14,13 @@ type MockECS struct {
 	WaitUntilTasksStoppedFn         func(input *ecs.DescribeTasksInput) error
 }
 
+type MockSSM struct {
+	WaitUntilCommandExecutedFn func(input *ssm.GetCommandInvocationInput) error
+	SendCommandFn              func(input *ssm.SendCommandInput) (*ssm.SendCommandOutput, error)
+	GetCommandInvocationFn     func(input *ssm.GetCommandInvocationInput) (*ssm.GetCommandInvocationOutput, error)
+}
+
+var _ SSMAPI = (*MockSSM)(nil)
 var _ ECSAPI = (*MockECS)(nil)
 
 func (m MockECS) ListContainerInstancesPages(input *ecs.ListContainerInstancesInput, fn func(*ecs.ListContainerInstancesOutput, bool) bool) error {
@@ -37,4 +45,16 @@ func (m MockECS) DescribeTasks(input *ecs.DescribeTasksInput) (*ecs.DescribeTask
 
 func (m MockECS) WaitUntilTasksStopped(input *ecs.DescribeTasksInput) error {
 	return m.WaitUntilTasksStoppedFn(input)
+}
+
+func (m MockSSM) SendCommand(input *ssm.SendCommandInput) (*ssm.SendCommandOutput, error) {
+	return m.SendCommandFn(input)
+}
+
+func (m MockSSM) WaitUntilCommandExecuted(input *ssm.GetCommandInvocationInput) error {
+	return m.WaitUntilCommandExecutedFn(input)
+}
+
+func (m MockSSM) GetCommandInvocation(input *ssm.GetCommandInvocationInput) (*ssm.GetCommandInvocationOutput, error) {
+	return m.GetCommandInvocationFn(input)
 }
