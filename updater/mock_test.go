@@ -1,9 +1,11 @@
 package main
 
-import "github.com/aws/aws-sdk-go/service/ecs"
+import (
+	"github.com/aws/aws-sdk-go/service/ecs"
+)
 
 type MockECS struct {
-	ListContainerInstancesFn        func(input *ecs.ListContainerInstancesInput) (*ecs.ListContainerInstancesOutput, error)
+	ListContainerInstancesPagesFn   func(input *ecs.ListContainerInstancesInput, fn func(*ecs.ListContainerInstancesOutput, bool) bool) error
 	DescribeContainerInstancesFn    func(input *ecs.DescribeContainerInstancesInput) (*ecs.DescribeContainerInstancesOutput, error)
 	UpdateContainerInstancesStateFn func(input *ecs.UpdateContainerInstancesStateInput) (*ecs.UpdateContainerInstancesStateOutput, error)
 	ListTasksFn                     func(input *ecs.ListTasksInput) (*ecs.ListTasksOutput, error)
@@ -13,8 +15,8 @@ type MockECS struct {
 
 var _ ECSAPI = (*MockECS)(nil)
 
-func (m MockECS) ListContainerInstances(input *ecs.ListContainerInstancesInput) (*ecs.ListContainerInstancesOutput, error) {
-	return m.ListContainerInstancesFn(input)
+func (m MockECS) ListContainerInstancesPages(input *ecs.ListContainerInstancesInput, fn func(*ecs.ListContainerInstancesOutput, bool) bool) error {
+	return m.ListContainerInstancesPagesFn(input, fn)
 }
 
 func (m MockECS) DescribeContainerInstances(input *ecs.DescribeContainerInstancesInput) (*ecs.DescribeContainerInstancesOutput, error) {

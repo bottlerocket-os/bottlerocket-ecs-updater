@@ -12,17 +12,13 @@ import (
 	"github.com/aws/aws-sdk-go/service/ssm"
 )
 
-const (
-	pageSize = 50
-)
-
 type instance struct {
 	instanceID          string
 	containerInstanceID string
 }
 
 type ECSAPI interface {
-	ListContainerInstances(*ecs.ListContainerInstancesInput) (*ecs.ListContainerInstancesOutput, error)
+	ListContainerInstancesPages(*ecs.ListContainerInstancesInput, func(*ecs.ListContainerInstancesOutput, bool) bool) error
 	DescribeContainerInstances(input *ecs.DescribeContainerInstancesInput) (*ecs.DescribeContainerInstancesOutput, error)
 	UpdateContainerInstancesState(input *ecs.UpdateContainerInstancesStateInput) (*ecs.UpdateContainerInstancesStateOutput, error)
 	ListTasks(input *ecs.ListTasksInput) (*ecs.ListTasksOutput, error)
@@ -30,32 +26,46 @@ type ECSAPI interface {
 	WaitUntilTasksStopped(input *ecs.DescribeTasksInput) error
 }
 
+const ecsPageSize = 100
+
 func (u *updater) listContainerInstances() ([]*string, error) {
-	resp, err := u.ecs.ListContainerInstances(&ecs.ListContainerInstancesInput{
-		Cluster:    &u.cluster,
-		MaxResults: aws.Int64(pageSize),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("cannot list container instances: %#v", err)
+	containerInstances := make([]*string, 0)
+	input := &ecs.ListContainerInstancesInput{
+		Cluster: &u.cluster,
 	}
-	log.Printf("%#v", resp)
-	return resp.ContainerInstanceArns, nil
+	if err := u.ecs.ListContainerInstancesPages(input, func(output *ecs.ListContainerInstancesOutput, lastpage bool) bool {
+		if len(output.ContainerInstanceArns) > 0 {
+			containerInstances = append(containerInstances, output.ContainerInstanceArns...)
+		}
+		return !lastpage
+	}); err != nil {
+		return nil, fmt.Errorf("cannot list container instances: %v", err)
+	}
+	return containerInstances, nil
 }
 
 // filterBottlerocketInstances filters container instances and returns list of
 // instances that are running Bottlerocket OS
 func (u *updater) filterBottlerocketInstances(instances []*string) ([]instance, error) {
-	resp, err := u.ecs.DescribeContainerInstances(&ecs.DescribeContainerInstancesInput{
-		Cluster:            &u.cluster,
-		ContainerInstances: instances,
+	containerInstances := make([]*ecs.ContainerInstance, 0)
+	err := eachPage(len(instances), ecsPageSize, func(start, stop int) error {
+		resp, err := u.ecs.DescribeContainerInstances(&ecs.DescribeContainerInstancesInput{
+			Cluster:            &u.cluster,
+			ContainerInstances: instances[start:stop],
+		})
+		if err != nil {
+			return fmt.Errorf("cannot describe container instances: %#v", err)
+		}
+		containerInstances = append(containerInstances, resp.ContainerInstances...)
+		return nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("cannot describe container instances: %#v", err)
+		return nil, err
 	}
 
-	bottlerocketInstances := make([]instance, 0)
 	// check the DescribeContainerInstances response and add only Bottlerocket instances to the list
-	for _, containerInstance := range resp.ContainerInstances {
+	bottlerocketInstances := make([]instance, 0)
+	for _, containerInstance := range containerInstances {
 		if containsAttribute(containerInstance.Attributes, "bottlerocket.variant") {
 			bottlerocketInstances = append(bottlerocketInstances, instance{
 				instanceID:          aws.StringValue(containerInstance.Ec2InstanceId),
@@ -77,6 +87,19 @@ func containsAttribute(attrs []*ecs.Attribute, searchString string) bool {
 	return false
 }
 
+func eachPage(inputLen int, size int, fn func(start, stop int) error) error {
+	for start := 0; start < inputLen; start += size {
+		stop := start + size
+		if stop > inputLen {
+			stop = inputLen
+		}
+		if err := fn(start, stop); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // filterAvailableUpdates returns a list of instances that have updates available
 func (u *updater) filterAvailableUpdates(bottlerocketInstances []instance) ([]instance, error) {
 	// make slice of Bottlerocket instances to use with SendCommand and checkCommandOutput
@@ -85,24 +108,31 @@ func (u *updater) filterAvailableUpdates(bottlerocketInstances []instance) ([]in
 		instances = append(instances, inst.instanceID)
 	}
 
-	commandID, err := u.sendCommand(instances, "apiclient update check")
+	candidates := make([]instance, 0)
+	// iterate through instances in batches of 50 or less for sendCommand
+	err := eachPage(len(instances), ssmPageSzie, func(start, stop int) error {
+		commandID, err := u.sendCommand(instances, "apiclient update check")
+		if err != nil {
+			return err
+		}
+
+		for _, inst := range bottlerocketInstances {
+			commandOutput, err := u.getCommandResult(commandID, inst.instanceID)
+			if err != nil {
+				return err
+			}
+			updateState, err := isUpdateAvailable(commandOutput)
+			if err != nil {
+				return err
+			}
+			if updateState {
+				candidates = append(candidates, inst)
+			}
+		}
+		return nil
+	})
 	if err != nil {
 		return nil, err
-	}
-
-	candidates := make([]instance, 0)
-	for _, inst := range bottlerocketInstances {
-		commandOutput, err := u.getCommandResult(commandID, inst.instanceID)
-		if err != nil {
-			return nil, err
-		}
-		updateState, err := isUpdateAvailable(commandOutput)
-		if err != nil {
-			return nil, err
-		}
-		if updateState {
-			candidates = append(candidates, inst)
-		}
 	}
 	return candidates, nil
 }

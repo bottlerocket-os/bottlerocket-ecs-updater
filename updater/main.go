@@ -59,8 +59,9 @@ func _main() error {
 	if err != nil {
 		return err
 	}
+
 	if len(listedInstances) == 0 {
-		log.Print("Zero instances in the cluster")
+		log.Print("No instances in the cluster")
 		return nil
 	}
 

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -8,6 +10,89 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestListContainerInstances(t *testing.T) {
+	cases := []struct {
+		name          string
+		listOutput    *ecs.ListContainerInstancesOutput
+		listOutput2   *ecs.ListContainerInstancesOutput
+		listError     error
+		expectedError string
+		expectedOut   []*string
+	}{
+		{
+			name: "with instances",
+			listOutput: &ecs.ListContainerInstancesOutput{
+				ContainerInstanceArns: []*string{
+					aws.String("cont-inst-arn1"),
+					aws.String("cont-inst-arn2"),
+					aws.String("cont-inst-arn3")},
+				NextToken: aws.String("token"),
+			},
+			listOutput2: &ecs.ListContainerInstancesOutput{
+				ContainerInstanceArns: []*string{
+					aws.String("cont-inst-arn4"),
+					aws.String("cont-inst-arn5"),
+					aws.String("cont-inst-arn6")},
+				NextToken: nil,
+			},
+			expectedOut: []*string{
+				aws.String("cont-inst-arn1"),
+				aws.String("cont-inst-arn2"),
+				aws.String("cont-inst-arn3"),
+				aws.String("cont-inst-arn4"),
+				aws.String("cont-inst-arn5"),
+				aws.String("cont-inst-arn6")},
+			expectedError: "",
+		},
+		{
+			name: "without instances",
+			listOutput: &ecs.ListContainerInstancesOutput{
+				ContainerInstanceArns: []*string{},
+				NextToken:             nil,
+			},
+			listOutput2: &ecs.ListContainerInstancesOutput{
+				ContainerInstanceArns: []*string{},
+				NextToken:             nil,
+			},
+			expectedOut: []*string{},
+		},
+		{
+			name:      "list fail",
+			listError: errors.New("failed to list instances"),
+			listOutput: &ecs.ListContainerInstancesOutput{
+				ContainerInstanceArns: []*string{},
+			},
+			listOutput2: &ecs.ListContainerInstancesOutput{
+				ContainerInstanceArns: []*string{},
+			},
+			expectedError: "cannot list container instances",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mockECS := MockECS{
+				ListContainerInstancesPagesFn: func(_ *ecs.ListContainerInstancesInput, fn func(*ecs.ListContainerInstancesOutput, bool) bool) error {
+					fn(tc.listOutput, true)
+					fn(tc.listOutput2, false)
+					return tc.listError
+				},
+			}
+			u := updater{ecs: mockECS}
+			actual, err := u.listContainerInstances()
+			if tc.expectedError != "" && tc.listError != nil {
+				assert.EqualError(t, err, fmt.Sprintf("%s: %v", tc.expectedError, tc.listError))
+			} else if actual == nil {
+				assert.EqualValues(t, tc.expectedOut, actual)
+			} else {
+				require.NoError(t, err)
+				assert.EqualValues(t, tc.expectedOut, actual)
+			}
+		},
+		)
+	}
+}
 
 func TestFilterBottlerocketInstances(t *testing.T) {
 	output := &ecs.DescribeContainerInstancesOutput{
