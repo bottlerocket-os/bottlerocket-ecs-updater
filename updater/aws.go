@@ -34,9 +34,10 @@ func (u *updater) listContainerInstances() ([]*string, error) {
 	resp, err := u.ecs.ListContainerInstances(&ecs.ListContainerInstancesInput{
 		Cluster:    &u.cluster,
 		MaxResults: aws.Int64(pageSize),
+		Status:     aws.String("ACTIVE"),
 	})
 	if err != nil {
-		return nil, fmt.Errorf("cannot list container instances: %#v", err)
+		return nil, fmt.Errorf("cannot list container instances: %w", err)
 	}
 	log.Printf("%#v", resp)
 	return resp.ContainerInstanceArns, nil
