@@ -19,6 +19,16 @@ const (
 type instance struct {
 	instanceID          string
 	containerInstanceID string
+	bottlerocketVersion string
+}
+
+type checkOutput struct {
+	UpdateState     string `json:"update_state"`
+	ActivePartition struct {
+		Image struct {
+			Version string `json:"version"`
+		} `json:"image"`
+	} `json:"active_partition"`
 }
 
 type ECSAPI interface {
@@ -96,11 +106,14 @@ func (u *updater) filterAvailableUpdates(bottlerocketInstances []instance) ([]in
 		if err != nil {
 			return nil, err
 		}
-		updateState, err := isUpdateAvailable(commandOutput)
+		output, err := parseCommandOutput(commandOutput)
 		if err != nil {
-			return nil, err
+			// not a fatal error, we can continue checking other instances.
+			log.Printf("Failed to parse command output %s: %v", string(commandOutput), err)
+			continue
 		}
-		if updateState {
+		if output.UpdateState == "Available" {
+			inst.bottlerocketVersion = output.ActivePartition.Image.Version
 			candidates = append(candidates, inst)
 		}
 	}
@@ -209,6 +222,55 @@ func (u *updater) waitUntilDrained(containerInstance string) error {
 	})
 }
 
+// updateInstance starts an update process on an instance.
+func (u *updater) updateInstance(inst instance) error {
+	log.Printf("Starting update on instance %#q", inst)
+	ec2IDs := []string{inst.instanceID}
+	_, err := u.sendCommand(ec2IDs, "apiclient update apply --reboot")
+	if err != nil {
+		return fmt.Errorf("error in sending update command: %w", err)
+	}
+
+	err = u.waitUntilOk(inst.instanceID)
+	if err != nil {
+		return fmt.Errorf("failed to reach Ok status after reboot: %w", err)
+	}
+	return nil
+}
+
+// verifyUpdate verifies if instance was properly updated
+func (u *updater) verifyUpdate(inst instance) (bool, error) {
+	log.Println("Verifying update by checking there is no new version available to update" +
+		" and validate the active version")
+	ec2IDs := []string{inst.instanceID}
+	updateStatus, err := u.sendCommand(ec2IDs, "apiclient update check")
+	if err != nil {
+		return false, fmt.Errorf("failed to send update check command: %v", err)
+	}
+
+	updateResult, err := u.getCommandResult(updateStatus, inst.instanceID)
+	if err != nil {
+		return false, fmt.Errorf("failed to get check command output: %w", err)
+	}
+	output, err := parseCommandOutput(updateResult)
+	if err != nil {
+		return false, fmt.Errorf("failed to parse command output %s, manual verification required: %w", string(updateResult), err)
+	}
+	updatedVersion := output.ActivePartition.Image.Version
+	if updatedVersion == inst.bottlerocketVersion {
+		log.Printf("Container instance %q did not update, its current "+
+			"version %s and updated version %s are the same", inst.containerInstanceID, inst.bottlerocketVersion, updatedVersion)
+		return false, nil
+	} else if output.UpdateState == "Available" {
+		log.Printf("Container instance %q was updated to version %q successfully, however another newer version was recently released;"+
+			" Instance will be updated to newer version in next iteration.", inst.containerInstanceID, updatedVersion)
+		return true, nil
+	} else {
+		log.Printf("Container instance %q updated to version %q", inst.containerInstanceID, updatedVersion)
+	}
+	return true, nil
+}
+
 func (u *updater) sendCommand(instanceIDs []string, ssmCommand string) (string, error) {
 	log.Printf("Sending SSM command %q", ssmCommand)
 	resp, err := u.ssm.SendCommand(&ssm.SendCommandInput{
@@ -249,47 +311,22 @@ func (u *updater) getCommandResult(commandID string, instanceID string) ([]byte,
 	return commandResults, nil
 }
 
-func isUpdateAvailable(commandOutput []byte) (bool, error) {
-	type updateCheckResult struct {
-		UpdateState string `json:"update_state"`
-	}
-
-	var updateState updateCheckResult
-	err := json.Unmarshal(commandOutput, &updateState)
-	if err != nil {
-		return false, fmt.Errorf("failed to unmarshal update state: %#v", err)
-	}
-	return updateState.UpdateState == "Available", nil
-}
-
-// getActiveVersion unmarshals GetCommandInvocation output to determine the active version of a Bottlerocket instance.
-// Takes GetCommandInvocation output as a parameter and returns the active version in use.
-func getActiveVersion(commandOutput []byte) (string, error) {
-	type version struct {
-		Version string `json:"version"`
-	}
-
-	type image struct {
-		Image version `json:"image"`
-	}
-
-	type partition struct {
-		ActivePartition image `json:"active_partition"`
-	}
-
-	var activeVersion partition
-	err := json.Unmarshal(commandOutput, &activeVersion)
-	if err != nil {
-		log.Printf("failed to unmarshal command invocation output: %#v", err)
-		return "", err
-	}
-	versionInUse := activeVersion.ActivePartition.Image.Version
-	return versionInUse, nil
-}
-
 // waitUntilOk takes an EC2 ID as a parameter and waits until the specified EC2 instance is in an Ok status.
 func (u *updater) waitUntilOk(ec2ID string) error {
 	return u.ec2.WaitUntilInstanceStatusOk(&ec2.DescribeInstanceStatusInput{
 		InstanceIds: []*string{aws.String(ec2ID)},
 	})
+}
+
+// parseCommandOutput takes raw bytes of ssm command output and converts it into a struct
+func parseCommandOutput(commandOutput []byte) (checkOutput, error) {
+	output := checkOutput{}
+	err := json.Unmarshal(commandOutput, &output)
+	if err != nil {
+		return output, fmt.Errorf("failed to unmarshal json: %w", err)
+	}
+	if output.UpdateState == "" || output.ActivePartition.Image.Version == "" {
+		return output, fmt.Errorf("mandatory fields are not available")
+	}
+	return output, nil
 }

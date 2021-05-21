@@ -100,61 +100,26 @@ func _main() error {
 		}
 		log.Printf("Instance %#q successfully drained!", i)
 
-		ec2IDs := []string{i.instanceID}
-		_, err = u.sendCommand(ec2IDs, "apiclient update apply --reboot")
-		if err != nil {
-			// TODO add nuanced error checking to determine the type of failure, act accordingly.
-			log.Printf("%#v", err)
-			err2 := u.activateInstance(i.containerInstanceID)
-			if err2 != nil {
-				log.Printf("failed to re-activate instance %#q after failure to execute update command. Aborting update operations.", i)
-				return err2
-			}
+		updateErr := u.updateInstance(i)
+		activateErr := u.activateInstance(i.containerInstanceID)
+		if updateErr != nil && activateErr != nil {
+			log.Printf("Failed to update instance %#q: %v", i, updateErr)
+			return fmt.Errorf("instance %#q failed to re-activate after failing to update: %w", i, activateErr)
+		} else if updateErr != nil {
+			log.Printf("Failed to update instance %#q: %v", i, updateErr)
 			continue
+		} else if activateErr != nil {
+			return fmt.Errorf("instance %#q failed to re-activate after update: %w", i, activateErr)
 		}
 
-		err = u.waitUntilOk(i.instanceID)
+		ok, err := u.verifyUpdate(i)
 		if err != nil {
-			log.Printf("Instance %#q failed to enter an Ok status after reboot: %v", i, err)
+			log.Printf("Failed to verify update for instance %#q: %v", i, err)
 		}
-
-		err = u.activateInstance(i.containerInstanceID)
-		if err != nil {
-			return fmt.Errorf("instance %#q failed to return to ACTIVE after reboot. Aborting update operations", i)
-		}
-
-		updateStatus, err := u.sendCommand(ec2IDs, "apiclient update check")
-		if err != nil {
-			log.Printf("%#v", err)
-			continue
-		}
-
-		updateResult, err := u.getCommandResult(updateStatus, i.instanceID)
-		if err != nil {
-			log.Printf("%#v", err)
-			continue
-		}
-		updateState, err := isUpdateAvailable(updateResult)
-		if err != nil {
-			log.Printf("Unable to determine update result. Manual verification of %#q required", i)
-			continue
-		}
-
-		if updateState {
-			log.Printf("Instance %#q did not update. Manual update advised.", i)
-			continue
+		if !ok {
+			log.Printf("Update failed for instance %#q", i)
 		} else {
-			log.Printf("Instance %#q updated successfully", i)
-		}
-
-		updatedVersion, err := getActiveVersion(updateResult)
-		if err != nil {
-			log.Printf("%#v", err)
-		}
-		if len(updatedVersion) != 0 {
-			log.Printf("Instance %#q running Bottlerocket: %s", i, updatedVersion)
-		} else {
-			log.Printf("Unable to verify active version. Manual verification of %#q required.", i)
+			log.Printf("Instance %#q updated successfully!", i)
 		}
 	}
 	return nil
