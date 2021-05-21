@@ -63,6 +63,7 @@ Resources:
                   - 'ecs:ListTasks'
                   - 'ecs:UpdateContainerInstancesState'
                   - 'ecs:DescribeTasks'
+                Resource: '*'
                 Condition:
                   ArnEquals:
                     ecs:cluster: !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:cluster/${ClusterName}'
