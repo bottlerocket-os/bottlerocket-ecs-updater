@@ -80,6 +80,11 @@ Resources:
                   - 'ssm:GetCommandInvocation'
                 Resource:
                   - !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:*"
+              # Allows checking the EC2 instance state after an update occurs
+              - Effect: Allow
+                Action:
+                  - 'ec2:DescribeInstanceStatus'
+                Resource: '*'
   UpdaterTaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Properties:
