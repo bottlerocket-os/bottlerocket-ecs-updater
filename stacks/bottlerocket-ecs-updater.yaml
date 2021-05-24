@@ -72,7 +72,8 @@ Resources:
                 Action:
                   - 'ssm:SendCommand'
                 Resource:
-                  - !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}::document/AWS-RunShellScript"
+                  - !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:document/${UpdateCheckCommand}"
+                  - !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:document/${UpdateApplyCommand}"
                   - !Sub "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/*"
               # Allows get command invocation to get Bottlerocket API calls output
               - Effect: Allow
@@ -103,6 +104,10 @@ Resources:
             - !Ref ClusterName
             - -region
             - !Ref AWS::Region
+            - -check-document
+            - !Ref UpdateCheckCommand
+            - -apply-document
+            - !Ref UpdateApplyCommand
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -163,3 +168,39 @@ Resources:
                 Resource:
                   - !GetAtt TaskRole.Arn
                   - !GetAtt ExecutionRole.Arn
+  UpdateCheckCommand:
+    Type: AWS::SSM::Document
+    Properties:
+      DocumentType: Command
+      Content:
+        schemaVersion: "2.2"
+        description: "Bottlerocket - Check available updates"
+        mainSteps:
+          - action: "aws:runShellScript"
+            name: "CheckUpdate"
+            precondition:
+              StringEquals:
+                - platformType
+                - Linux
+            inputs:
+              timeoutSeconds: '1800'
+              runCommand:
+                - "apiclient update check"
+  UpdateApplyCommand:
+    Type: AWS::SSM::Document
+    Properties:
+      DocumentType: Command
+      Content:
+        schemaVersion: "2.2"
+        description: "Bottlerocket - Apply update"
+        mainSteps:
+          - action: "aws:runShellScript"
+            name: "ApplyUpdate"
+            precondition:
+              StringEquals:
+                - platformType
+                - Linux
+            inputs:
+              timeoutSeconds: '1800'
+              runCommand:
+                - "apiclient update apply --reboot"

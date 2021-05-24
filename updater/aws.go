@@ -95,7 +95,7 @@ func (u *updater) filterAvailableUpdates(bottlerocketInstances []instance) ([]in
 		instances = append(instances, inst.instanceID)
 	}
 
-	commandID, err := u.sendCommand(instances, "apiclient update check")
+	commandID, err := u.sendCommand(instances, u.checkDocument)
 	if err != nil {
 		return nil, err
 	}
@@ -226,7 +226,7 @@ func (u *updater) waitUntilDrained(containerInstance string) error {
 func (u *updater) updateInstance(inst instance) error {
 	log.Printf("Starting update on instance %#q", inst)
 	ec2IDs := []string{inst.instanceID}
-	_, err := u.sendCommand(ec2IDs, "apiclient update apply --reboot")
+	_, err := u.sendCommand(ec2IDs, u.applyDocument)
 	if err != nil {
 		return fmt.Errorf("error in sending update command: %w", err)
 	}
@@ -243,7 +243,7 @@ func (u *updater) verifyUpdate(inst instance) (bool, error) {
 	log.Println("Verifying update by checking there is no new version available to update" +
 		" and validate the active version")
 	ec2IDs := []string{inst.instanceID}
-	updateStatus, err := u.sendCommand(ec2IDs, "apiclient update check")
+	updateStatus, err := u.sendCommand(ec2IDs, u.checkDocument)
 	if err != nil {
 		return false, fmt.Errorf("failed to send update check command: %v", err)
 	}
@@ -271,15 +271,12 @@ func (u *updater) verifyUpdate(inst instance) (bool, error) {
 	return true, nil
 }
 
-func (u *updater) sendCommand(instanceIDs []string, ssmCommand string) (string, error) {
-	log.Printf("Sending SSM command %q", ssmCommand)
+func (u *updater) sendCommand(instanceIDs []string, ssmDocument string) (string, error) {
+	log.Printf("Sending SSM document %q", ssmDocument)
 	resp, err := u.ssm.SendCommand(&ssm.SendCommandInput{
-		DocumentName:    aws.String("AWS-RunShellScript"),
+		DocumentName:    aws.String(ssmDocument),
 		DocumentVersion: aws.String("$DEFAULT"),
 		InstanceIds:     aws.StringSlice(instanceIDs),
-		Parameters: map[string][]*string{
-			"commands": {aws.String(ssmCommand)},
-		},
 	})
 	if err != nil {
 		return "", fmt.Errorf("send command failed: %w", err)
@@ -295,7 +292,7 @@ func (u *updater) sendCommand(instanceIDs []string, ssmCommand string) (string, 
 			InstanceId: &v,
 		})
 	}
-	log.Printf("SSM command %q posted with command id %q", ssmCommand, commandID)
+	log.Printf("SSM document %q posted with command id %q", ssmDocument, commandID)
 	return commandID, nil
 }
 
