@@ -48,6 +48,12 @@ type ECSAPI interface {
 	WaitUntilTasksStoppedWithContext(ctx aws.Context, input *ecs.DescribeTasksInput, opts ...request.WaiterOption) error
 }
 
+type SSMAPI interface {
+	WaitUntilCommandExecutedWithContext(ctx aws.Context, input *ssm.GetCommandInvocationInput, opts ...request.WaiterOption) error
+	SendCommand(input *ssm.SendCommandInput) (*ssm.SendCommandOutput, error)
+	GetCommandInvocation(input *ssm.GetCommandInvocationInput) (*ssm.GetCommandInvocationOutput, error)
+}
+
 func (u *updater) listContainerInstances() ([]*string, error) {
 	resp, err := u.ecs.ListContainerInstances(&ecs.ListContainerInstancesInput{
 		Cluster:    &u.cluster,
@@ -342,13 +348,22 @@ func (u *updater) sendCommand(instanceIDs []string, ssmDocument string) (string,
 
 	commandID := *resp.Command.CommandId
 	// Wait for the sent commands to complete.
+	errCount := 0
 	for _, v := range instanceIDs {
-		u.ssm.WaitUntilCommandExecutedWithContext(aws.BackgroundContext(), &ssm.GetCommandInvocationInput{
+		err = u.ssm.WaitUntilCommandExecutedWithContext(aws.BackgroundContext(), &ssm.GetCommandInvocationInput{
 			CommandId:  &commandID,
 			InstanceId: &v,
 		},
 			request.WithWaiterMaxAttempts(waiterMaxAttempts),
 			request.WithWaiterDelay(request.ConstantWaiterDelay(waiterDelay)))
+		if err != nil {
+			errCount++
+			log.Printf("Error encountered while awaiting document %q execution for instance: %q: %s", ssmDocument, v, err)
+		}
+	}
+	// TODO return a list of instanceIDs which ecnountered no waiter errors.
+	if errCount == len(instanceIDs) {
+		return "", fmt.Errorf("too many failures while awaiting document execution: %w", err)
 	}
 	log.Printf("SSM document %q posted with command id %q", ssmDocument, commandID)
 	return commandID, nil

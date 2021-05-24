@@ -5,10 +5,99 @@ import (
 	"testing"
 
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/request"
 	"github.com/aws/aws-sdk-go/service/ecs"
+	"github.com/aws/aws-sdk-go/service/ssm"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestSendCommand(t *testing.T) {
+	// commandSuccessInstance indicates an instance for which the command should succeed
+	// regardless of whether `waitError` is set.
+	const commandSuccessInstance = "inst-success"
+	cases := []struct {
+		name          string
+		sendOutput    *ssm.SendCommandOutput
+		sendError     error
+		expectedError string
+		expectedOut   string
+		waitError     error
+		instances     []string
+	}{
+		{
+			name: "send success",
+			sendOutput: &ssm.SendCommandOutput{
+				Command: &ssm.Command{CommandId: aws.String("id1")},
+			},
+			instances:   []string{"inst-id-1"},
+			expectedOut: "id1",
+		},
+		{
+			name:          "send fail",
+			sendError:     errors.New("failed to send command"),
+			expectedError: "send command failed",
+			instances:     []string{"inst-id-1"},
+		},
+		{
+			name:      "wait single failure",
+			waitError: errors.New("exceeded max attempts"),
+			sendOutput: &ssm.SendCommandOutput{
+				Command: &ssm.Command{CommandId: aws.String("")},
+			},
+			expectedError: "too many failures while awaiting document execution",
+			instances:     []string{"inst-id-1"},
+		},
+		{
+			name:      "wait one succcess",
+			waitError: errors.New("exceeded max attempts"),
+			sendOutput: &ssm.SendCommandOutput{
+				Command: &ssm.Command{CommandId: aws.String("id1")},
+			},
+			instances:   []string{"inst-id-1", "inst-id-2", commandSuccessInstance},
+			expectedOut: "id1",
+		},
+		{
+			name:      "wait fail all",
+			waitError: errors.New("exceeded max attempts"),
+			sendOutput: &ssm.SendCommandOutput{
+				Command: &ssm.Command{CommandId: aws.String("id1")},
+			},
+			expectedError: "too many failures while awaiting document execution",
+			instances:     []string{"inst-id-1", "inst-id-2", "inst-id-3"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mockSSM := MockSSM{
+				SendCommandFn: func(input *ssm.SendCommandInput) (*ssm.SendCommandOutput, error) {
+					assert.Equal(t, "test-doc", aws.StringValue(input.DocumentName))
+					assert.Equal(t, "$DEFAULT", aws.StringValue(input.DocumentVersion))
+					assert.Equal(t, aws.StringSlice(tc.instances), input.InstanceIds)
+					return tc.sendOutput, tc.sendError
+				},
+				WaitUntilCommandExecutedWithContextFn: func(ctx aws.Context, input *ssm.GetCommandInvocationInput, opts ...request.WaiterOption) error {
+					if aws.StringValue(input.InstanceId) == commandSuccessInstance {
+						return nil
+					}
+					return tc.waitError
+				},
+			}
+			u := updater{ssm: mockSSM}
+			actual, err := u.sendCommand(tc.instances, "test-doc")
+			if tc.expectedOut != "" {
+				require.NoError(t, err)
+				assert.EqualValues(t, tc.expectedOut, actual)
+			} else if tc.sendError != nil {
+				assert.ErrorIs(t, err, tc.sendError)
+				assert.Contains(t, err.Error(), tc.expectedError)
+			} else {
+				assert.ErrorIs(t, err, tc.waitError)
+				assert.Contains(t, err.Error(), tc.expectedError)
+			}
+		})
+	}
+}
 
 func TestListContainerInstances(t *testing.T) {
 	cases := []struct {
