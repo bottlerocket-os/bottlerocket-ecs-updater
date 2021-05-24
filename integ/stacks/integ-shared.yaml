@@ -1,0 +1,147 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Bottlerocket ECS updater integration tests shared resources
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      CidrBlock: 10.0.0.0/16
+      Tags:
+        - Key: Name
+          Value: ECSUpdaterInteg
+  SubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.5.0/24
+      AvailabilityZone: !Select
+        - 0
+        - !GetAZs
+          Ref: 'AWS::Region'
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: ECSUpdaterIntegSubnetA
+  SubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.6.0/24
+      AvailabilityZone: !Select
+        - 1
+        - !GetAZs
+          Ref: 'AWS::Region'
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: ECSUpdaterIntegSubnetB
+  SubnetC:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.7.0/24
+      AvailabilityZone: !Select
+        - 2
+        - !GetAZs
+          Ref: 'AWS::Region'
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: ECSUpdaterIntegSubnetC
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security Group for ECS Updater Task
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: ECSUpdaterInteg
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: ECSUpdaterInteg
+  GatewayAttachement:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+  RouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: ECSUpdaterInteg
+  DefaultRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref RouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+  PublicSubnetARouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref SubnetA
+      RouteTableId: !Ref RouteTable
+  PublicSubnetBRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref SubnetB
+      RouteTableId: !Ref RouteTable
+  PublicSubnetCRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref SubnetC
+      RouteTableId: !Ref RouteTable
+  EcsInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: 'Role for Bottlerocket container instances'
+      Path: !Sub '/bottlerocket/ecs-updater-integ/${AWS::StackName}/'
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: 'ec2.amazonaws.com'
+            Action:
+              - 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role'
+        - 'arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore'
+  EcsInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: !Ref EcsInstanceRole
+      Path: !Sub '/bottlerocket/ecs-updater-integ/${AWS::StackName}/'
+      Roles:
+        - !Ref EcsInstanceRole
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: 60
+      LogGroupName: 'bottlerocket-ecs-updater-integ'
+Outputs:
+  PublicSubnets:
+    Description: 'List of Subnets'
+    Value: !Join [ ",", [ !Ref SubnetA, !Ref SubnetB, !Ref SubnetC ] ]
+    Export:
+      Name: !Sub "${AWS::StackName}:PublicSubnets"
+  SecurityGroupID:
+    Description: 'Security group ID'
+    Value: !GetAtt SecurityGroup.GroupId
+    Export:
+      Name: !Sub "${AWS::StackName}:SecurityGroupID"
+  InstanceProfile:
+    Description: 'Security group ID'
+    Value: !Ref EcsInstanceProfile
+    Export:
+      Name: !Sub "${AWS::StackName}:EcsInstanceProfile"
+  LogGroupName:
+    Description: 'Cloudwatch log group'
+    Value: !Ref LogGroup
+    Export:
+      Name: !Sub "${AWS::StackName}:LogGroup"

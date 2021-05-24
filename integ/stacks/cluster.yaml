@@ -1,0 +1,63 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: 'ECS Updater Integration Test Cluster'
+Parameters:
+  IntegSharedResourceStack:
+    Type: String
+    Description: 'Name of the CloudFormation stack that sets up the shared resource for testing.'
+  ImageID:
+      Description: 'Bottlerocket `aws-ecs-1` variant image id'
+      Type: AWS::EC2::Image::Id
+  InstanceCount:
+      Description: 'Desired number of Bottlerocket instances in cluster'
+      Default: 10
+      Type: Number
+  InstanceType:
+    Type: String
+    Default: m5.xlarge
+    Description: 'Instance type for the instances'
+Resources:
+  Cluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub '${AWS::StackName}'
+  LaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateData:
+        IamInstanceProfile:
+          Name:
+            Fn::ImportValue:
+              !Sub "${IntegSharedResourceStack}:EcsInstanceProfile"
+        ImageId: !Ref ImageID
+        InstanceType: !Ref InstanceType
+        SecurityGroupIds:
+          - Fn::ImportValue:
+              !Sub "${IntegSharedResourceStack}:SecurityGroupID"
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+              - Key: "Name"
+                Value: !Sub "${AWS::StackName}-instance"
+        UserData:
+          Fn::Base64:
+            !Sub |
+              [settings.ecs]
+              cluster = "${AWS::StackName}"
+  AutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      MinSize: !Ref InstanceCount
+      MaxSize: "50"
+      DesiredCapacity: !Ref InstanceCount
+      VPCZoneIdentifier:
+        Fn::Split:
+        - ","
+        - Fn::ImportValue:
+            !Sub "${IntegSharedResourceStack}:PublicSubnets"
+      MixedInstancesPolicy:
+        InstancesDistribution:
+          OnDemandBaseCapacity: !Ref InstanceCount
+        LaunchTemplate:
+          LaunchTemplateSpecification:
+            LaunchTemplateId: !Ref LaunchTemplate
+            Version: !GetAtt LaunchTemplate.LatestVersionNumber

@@ -43,6 +43,8 @@ golang-lint:
 .PHONY: cfn-lint
 cfn-lint:
 	cfn-lint ./stacks/bottlerocket-ecs-updater.yaml
+	cfn-lint ./integ/stacks/integ-shared.yaml
+	cfn-lint ./integ/stacks/cluster.yaml
 
 clean:
 	-rm -rf updater/bin
