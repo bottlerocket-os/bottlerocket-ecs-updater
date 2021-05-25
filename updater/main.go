@@ -17,13 +17,17 @@ import (
 var (
 	flagCluster = flag.String("cluster", "", "The short name or full Amazon Resource Name (ARN) of the cluster in which we will manage Bottlerocket instances.")
 	flagRegion  = flag.String("region", "", "The AWS Region in which cluster is running.")
+	flagCheck   = flag.String("check-document", "", "The SSM document name for checking available updates.")
+	flagApply   = flag.String("apply-document", "", "The SSM document name for applying updates.")
 )
 
 type updater struct {
-	cluster string
-	ecs     ECSAPI
-	ssm     *ssm.SSM
-	ec2     *ec2.EC2
+	cluster       string
+	checkDocument string
+	applyDocument string
+	ecs           ECSAPI
+	ssm           *ssm.SSM
+	ec2           *ec2.EC2
 }
 
 func main() {
@@ -42,6 +46,12 @@ func _main() error {
 	case *flagRegion == "":
 		flag.Usage()
 		return errors.New("region is required")
+	case *flagCheck == "":
+		flag.Usage()
+		return errors.New("check-document is required")
+	case *flagApply == "":
+		flag.Usage()
+		return errors.New("apply-document is required")
 	}
 
 	sess := session.Must(session.NewSession(&aws.Config{
@@ -49,10 +59,12 @@ func _main() error {
 	}))
 
 	u := &updater{
-		cluster: *flagCluster,
-		ecs:     ecs.New(sess, aws.NewConfig()),
-		ssm:     ssm.New(sess, aws.NewConfig()),
-		ec2:     ec2.New(sess, aws.NewConfig()),
+		cluster:       *flagCluster,
+		checkDocument: *flagCheck,
+		applyDocument: *flagApply,
+		ecs:           ecs.New(sess, aws.NewConfig()),
+		ssm:           ssm.New(sess, aws.NewConfig()),
+		ec2:           ec2.New(sess, aws.NewConfig()),
 	}
 
 	listedInstances, err := u.listContainerInstances()
