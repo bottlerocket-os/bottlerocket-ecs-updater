@@ -303,7 +303,7 @@ func (u *updater) verifyUpdate(inst instance) (bool, error) {
 	ec2IDs := []string{inst.instanceID}
 	updateStatus, err := u.sendCommand(ec2IDs, u.checkDocument)
 	if err != nil {
-		return false, fmt.Errorf("failed to send update check command: %v", err)
+		return false, fmt.Errorf("failed to send update check command: %w", err)
 	}
 
 	updateResult, err := u.getCommandResult(updateStatus, inst.instanceID)
