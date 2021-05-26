@@ -118,7 +118,7 @@ func (u *updater) filterAvailableUpdates(bottlerocketInstances []instance) ([]in
 			log.Printf("Failed to parse command output %s: %v", string(commandOutput), err)
 			continue
 		}
-		if output.UpdateState == "Available" {
+		if output.UpdateState == updateStateAvailable || output.UpdateState == updateStateReady {
 			inst.bottlerocketVersion = output.ActivePartition.Image.Version
 			candidates = append(candidates, inst)
 		}
