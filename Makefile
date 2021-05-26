@@ -24,7 +24,6 @@ updater/bin/bottlerocket-ecs-updater: $(SOURCES) updater/go.mod updater/go.sum
 test:
 	cd updater && go test -v ./...
 
-
 .PHONY: image # creates a docker image with the updater binary
 image:
 	DOCKER_BUILDKIT=1 \
@@ -33,6 +32,17 @@ image:
 		--build-arg BUILDER_IMAGE=${BUILDER_IMAGE} \
 		--build-arg GOARCH=${UPDATER_TARGET_ARCH} \
 		"${PWD}/updater"
+
+.PHONY: lint
+lint: golang-lint cfn-lint
+
+.PHONY: golang-lint
+golang-lint:
+	cd updater; golangci-lint run
+
+.PHONY: cfn-lint
+cfn-lint:
+	cfn-lint ./stacks/bottlerocket-ecs-updater.yaml
 
 clean:
 	-rm -rf updater/bin
