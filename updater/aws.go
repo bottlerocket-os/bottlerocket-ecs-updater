@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/ec2"
@@ -13,7 +14,11 @@ import (
 )
 
 const (
-	pageSize = 50
+	pageSize             = 50
+	updateStateIdle      = "Idle"
+	updateStateStaged    = "Staged"
+	updateStateAvailable = "Available"
+	updateStateReady     = "Ready"
 )
 
 type instance struct {
@@ -113,7 +118,7 @@ func (u *updater) filterAvailableUpdates(bottlerocketInstances []instance) ([]in
 			log.Printf("Failed to parse command output %s: %v", string(commandOutput), err)
 			continue
 		}
-		if output.UpdateState == "Available" {
+		if output.UpdateState == updateStateAvailable || output.UpdateState == updateStateReady {
 			inst.bottlerocketVersion = output.ActivePartition.Image.Version
 			candidates = append(candidates, inst)
 		}
@@ -225,13 +230,59 @@ func (u *updater) waitUntilDrained(containerInstance string) error {
 
 // updateInstance starts an update process on an instance.
 func (u *updater) updateInstance(inst instance) error {
-	log.Printf("Starting update on instance %#q", inst)
+	log.Printf("Starting update on instance %q", inst.instanceID)
 	ec2IDs := []string{inst.instanceID}
-	_, err := u.sendCommand(ec2IDs, u.applyDocument)
+	log.Printf("Checking current update state of instance %q", inst.instanceID)
+
+	commandID, err := u.sendCommand(ec2IDs, u.checkDocument)
 	if err != nil {
-		return fmt.Errorf("error in sending update command: %w", err)
+		return fmt.Errorf("failed to send check command: %w", err)
+	}
+	output, err := u.getCommandResult(commandID, inst.instanceID)
+	if err != nil {
+		return fmt.Errorf("failed to get check command output: %w", err)
+	}
+	check, err := parseCommandOutput(output)
+	if err != nil {
+		return fmt.Errorf("failed to parse command output %s: %w", string(output), err)
 	}
 
+	switch check.UpdateState {
+	case updateStateIdle:
+		log.Printf("No new update available for instance %q", inst.instanceID)
+		return nil
+	case updateStateStaged:
+		return fmt.Errorf("unexpected update state %q; skipping instance", check.UpdateState)
+	case updateStateAvailable:
+		log.Printf("Starting update apply on instance %q", inst.instanceID)
+		_, err := u.sendCommand(ec2IDs, u.applyDocument)
+		if err != nil {
+			return fmt.Errorf("failed to send update apply command: %w", err)
+		}
+	case updateStateReady:
+		log.Printf("Update is previously applied on instance %q", inst.instanceID)
+	default:
+		return fmt.Errorf("unknown update state %q", check.UpdateState)
+	}
+
+	// occasionally instance goes into reboot before reporting command output, therefore
+	// we do not poll for command output. Instead we rely on verifyUpdate to confirm update
+	// success or failure.
+	log.Printf("Sending SSM document %q on instance %q", u.rebootDocument, inst.instanceID)
+	// SendCommand is directly called here because we do not want to wait on command complete.
+	resp, err := u.ssm.SendCommand(&ssm.SendCommandInput{
+		DocumentName:    aws.String(u.rebootDocument),
+		DocumentVersion: aws.String("$DEFAULT"),
+		InstanceIds:     aws.StringSlice(ec2IDs),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to send reboot command: %w", err)
+	}
+	rebootID := *resp.Command.CommandId
+	log.Printf("SSM document %q posted with command ID %q", u.rebootDocument, rebootID)
+
+	// added some sleep time for reboot to start before we check instance state
+	time.Sleep(15 * time.Second)
 	err = u.waitUntilOk(inst.instanceID)
 	if err != nil {
 		return fmt.Errorf("failed to reach Ok status after reboot: %w", err)
@@ -262,7 +313,7 @@ func (u *updater) verifyUpdate(inst instance) (bool, error) {
 		log.Printf("Container instance %q did not update, its current "+
 			"version %s and updated version %s are the same", inst.containerInstanceID, inst.bottlerocketVersion, updatedVersion)
 		return false, nil
-	} else if output.UpdateState == "Available" {
+	} else if output.UpdateState == updateStateAvailable {
 		log.Printf("Container instance %q was updated to version %q successfully, however another newer version was recently released;"+
 			" Instance will be updated to newer version in next iteration.", inst.containerInstanceID, updatedVersion)
 		return true, nil

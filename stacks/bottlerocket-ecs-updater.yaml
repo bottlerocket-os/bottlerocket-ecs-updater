@@ -74,6 +74,7 @@ Resources:
                 Resource:
                   - !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:document/${UpdateCheckCommand}"
                   - !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:document/${UpdateApplyCommand}"
+                  - !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:document/${RebootCommand}"
                   - !Sub "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/*"
               # Allows get command invocation to get Bottlerocket API calls output
               - Effect: Allow
@@ -108,6 +109,8 @@ Resources:
             - !Ref UpdateCheckCommand
             - -apply-document
             - !Ref UpdateApplyCommand
+            - -reboot-document
+            - !Ref RebootCommand
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -203,4 +206,22 @@ Resources:
             inputs:
               timeoutSeconds: '1800'
               runCommand:
-                - "apiclient update apply --reboot"
+                - "apiclient update apply"
+  RebootCommand:
+    Type: AWS::SSM::Document
+    Properties:
+      DocumentType: Command
+      Content:
+        schemaVersion: "2.2"
+        description: "Bottlerocket - Reboot"
+        mainSteps:
+          - action: "aws:runShellScript"
+            name: "Reboot"
+            precondition:
+              StringEquals:
+                - platformType
+                - Linux
+            inputs:
+              timeoutSeconds: '1800'
+              runCommand:
+                - "apiclient reboot"
