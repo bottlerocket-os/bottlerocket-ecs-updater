@@ -313,7 +313,7 @@ func (u *updater) verifyUpdate(inst instance) (bool, error) {
 		log.Printf("Container instance %q did not update, its current "+
 			"version %s and updated version %s are the same", inst.containerInstanceID, inst.bottlerocketVersion, updatedVersion)
 		return false, nil
-	} else if output.UpdateState == "Available" {
+	} else if output.UpdateState == updateStateAvailable {
 		log.Printf("Container instance %q was updated to version %q successfully, however another newer version was recently released;"+
 			" Instance will be updated to newer version in next iteration.", inst.containerInstanceID, updatedVersion)
 		return true, nil
