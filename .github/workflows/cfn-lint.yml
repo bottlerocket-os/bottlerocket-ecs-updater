@@ -3,9 +3,11 @@ on:
   push:
     paths:
       - 'stacks/*'
+      - 'integ/stacks/*'
   pull_request:
     paths:
       - 'stacks/*'
+      - 'integ/stacks/*'
 jobs:
   cfn-lint:
     runs-on: ubuntu-latest
