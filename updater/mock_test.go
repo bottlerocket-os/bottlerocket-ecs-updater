@@ -4,6 +4,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/request"
 	"github.com/aws/aws-sdk-go/service/ecs"
+	"github.com/aws/aws-sdk-go/service/ssm"
 )
 
 type MockECS struct {
@@ -16,6 +17,14 @@ type MockECS struct {
 }
 
 var _ ECSAPI = (*MockECS)(nil)
+
+type MockSSM struct {
+	WaitUntilCommandExecutedWithContextFn func(ctx aws.Context, input *ssm.GetCommandInvocationInput, opts ...request.WaiterOption) error
+	SendCommandFn                         func(input *ssm.SendCommandInput) (*ssm.SendCommandOutput, error)
+	GetCommandInvocationFn                func(input *ssm.GetCommandInvocationInput) (*ssm.GetCommandInvocationOutput, error)
+}
+
+var _ SSMAPI = (*MockSSM)(nil)
 
 func (m MockECS) ListContainerInstances(input *ecs.ListContainerInstancesInput) (*ecs.ListContainerInstancesOutput, error) {
 	return m.ListContainerInstancesFn(input)
@@ -39,4 +48,16 @@ func (m MockECS) DescribeTasks(input *ecs.DescribeTasksInput) (*ecs.DescribeTask
 
 func (m MockECS) WaitUntilTasksStoppedWithContext(ctx aws.Context, input *ecs.DescribeTasksInput, opts ...request.WaiterOption) error {
 	return m.WaitUntilTasksStoppedWithContextFn(ctx, input, opts...)
+}
+
+func (m MockSSM) SendCommand(input *ssm.SendCommandInput) (*ssm.SendCommandOutput, error) {
+	return m.SendCommandFn(input)
+}
+
+func (m MockSSM) WaitUntilCommandExecutedWithContext(ctx aws.Context, input *ssm.GetCommandInvocationInput, opts ...request.WaiterOption) error {
+	return m.WaitUntilCommandExecutedWithContextFn(ctx, input, opts...)
+}
+
+func (m MockSSM) GetCommandInvocation(input *ssm.GetCommandInvocationInput) (*ssm.GetCommandInvocationOutput, error) {
+	return m.GetCommandInvocationFn(input)
 }
