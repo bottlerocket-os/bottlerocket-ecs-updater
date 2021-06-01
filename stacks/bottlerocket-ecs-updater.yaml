@@ -121,8 +121,8 @@ Resources:
     Type: AWS::Events::Rule
     Properties:
       Description: "Check for Bottlerocket updates on a schedule"
-      # Run Task every 30 minutes
-      ScheduleExpression: "cron(0/30 * * * ? *)"
+      # Run Task every 12 hours
+      ScheduleExpression: "rate(12 hours)"
       State: 'ENABLED'
       Targets:
         - Id: ecs-updater-fargate-task
