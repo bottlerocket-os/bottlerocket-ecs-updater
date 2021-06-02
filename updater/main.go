@@ -76,7 +76,7 @@ func _main() error {
 
 	listedInstances, err := u.listContainerInstances()
 	if err != nil {
-		return err
+		return fmt.Errorf("Failed to get container instances in cluster %q: %w", u.cluster, err)
 	}
 	if len(listedInstances) == 0 {
 		log.Print("Zero instances in the cluster")
@@ -85,7 +85,7 @@ func _main() error {
 
 	bottlerocketInstances, err := u.filterBottlerocketInstances(listedInstances)
 	if err != nil {
-		return err
+		return fmt.Errorf("Failed to filter Bottlerocket instances: %w", err)
 	}
 
 	if len(bottlerocketInstances) == 0 {
@@ -94,7 +94,7 @@ func _main() error {
 	}
 	candidates, err := u.filterAvailableUpdates(bottlerocketInstances)
 	if err != nil {
-		return fmt.Errorf("failed to check updates: %#v", err)
+		return fmt.Errorf("Failed to check updates: %w", err)
 	}
 	if len(candidates) == 0 {
 		log.Printf("No instances to update")
@@ -112,6 +112,8 @@ func _main() error {
 			log.Printf("Instance %#q is not eligible for updates", i)
 			continue
 		}
+		log.Printf("Instance %q is eligible for update", i)
+
 		err = u.drainInstance(i.containerInstanceID)
 		if err != nil {
 			log.Printf("Failed to drain instance %#q: %v", i, err)
