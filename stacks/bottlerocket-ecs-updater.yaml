@@ -13,6 +13,10 @@ Parameters:
   LogGroupName:
     Description: 'Log group name for Bottlerocket updater logs'
     Type: String
+  ScheduleState:
+    Description: 'Schedule events rule state; allows disabling of scheduling'
+    Type: String
+    Default: 'ENABLED'
 Resources:
   ExecutionRole:
     Type: 'AWS::IAM::Role'
@@ -123,7 +127,7 @@ Resources:
       Description: "Check for Bottlerocket updates on a schedule"
       # Run Task every 12 hours
       ScheduleExpression: "rate(12 hours)"
-      State: 'ENABLED'
+      State: !Ref ScheduleState
       Targets:
         - Id: ecs-updater-fargate-task
           RoleArn: !GetAtt CronRole.Arn
@@ -225,3 +229,9 @@ Resources:
               timeoutSeconds: '1800'
               runCommand:
                 - "apiclient reboot"
+Outputs:
+  UpdaterTaskDefinitionArn:
+    Description: 'Updater task definition ARN'
+    Value: !Ref UpdaterTaskDefinition
+    Export:
+      Name: !Sub "${AWS::StackName}:UpdaterTaskDefinition"
