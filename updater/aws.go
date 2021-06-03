@@ -15,7 +15,8 @@ import (
 )
 
 const (
-	pageSize             = 50
+	ecsPageSize          = 100
+	ssmPageSize          = 50
 	updateStateIdle      = "Idle"
 	updateStateStaged    = "Staged"
 	updateStateAvailable = "Available"
@@ -42,7 +43,7 @@ type checkOutput struct {
 }
 
 type ECSAPI interface {
-	ListContainerInstances(*ecs.ListContainerInstancesInput) (*ecs.ListContainerInstancesOutput, error)
+	ListContainerInstancesPages(*ecs.ListContainerInstancesInput, func(*ecs.ListContainerInstancesOutput, bool) bool) error
 	DescribeContainerInstances(input *ecs.DescribeContainerInstancesInput) (*ecs.DescribeContainerInstancesOutput, error)
 	UpdateContainerInstancesState(input *ecs.UpdateContainerInstancesStateInput) (*ecs.UpdateContainerInstancesStateOutput, error)
 	ListTasks(input *ecs.ListTasksInput) (*ecs.ListTasksOutput, error)
@@ -62,40 +63,57 @@ type EC2API interface {
 
 func (u *updater) listContainerInstances() ([]*string, error) {
 	log.Printf("Listing active container instances in cluster %q", u.cluster)
-	resp, err := u.ecs.ListContainerInstances(&ecs.ListContainerInstancesInput{
-		Cluster:    &u.cluster,
-		MaxResults: aws.Int64(pageSize),
-		Status:     aws.String("ACTIVE"),
-	})
-	if err != nil {
+	containerInstances := make([]*string, 0)
+	input := &ecs.ListContainerInstancesInput{
+		Cluster: &u.cluster,
+		Status:  aws.String(ecs.ContainerInstanceStatusActive),
+	}
+	if err := u.ecs.ListContainerInstancesPages(input, func(output *ecs.ListContainerInstancesOutput, lastpage bool) bool {
+		containerInstances = append(containerInstances, output.ContainerInstanceArns...)
+		return true
+	}); err != nil {
 		return nil, fmt.Errorf("failed to list container instances: %w", err)
 	}
-	log.Printf("Found %d container instances in the cluster", len(resp.ContainerInstanceArns))
-	return resp.ContainerInstanceArns, nil
+	log.Printf("Found %d container instances in the cluster", len(containerInstances))
+	return containerInstances, nil
 }
 
 // filterBottlerocketInstances filters container instances and returns list of
 // instances that are running Bottlerocket OS
 func (u *updater) filterBottlerocketInstances(instances []*string) ([]instance, error) {
 	log.Printf("Filtering container instances running Bottlerocket OS")
-	resp, err := u.ecs.DescribeContainerInstances(&ecs.DescribeContainerInstancesInput{
-		Cluster:            &u.cluster,
-		ContainerInstances: instances,
+	bottlerocketInstances := make([]instance, 0)
+	errCount := 0
+	var lastErr error
+	pageCount, err := eachPage(len(instances), ecsPageSize, func(start, stop int) error {
+		resp, err := u.ecs.DescribeContainerInstances(&ecs.DescribeContainerInstancesInput{
+			Cluster:            &u.cluster,
+			ContainerInstances: instances[start:stop],
+		})
+		// count errors per page.
+		if err != nil {
+			log.Printf("Failed to describe container instances from %d to %d: %v", start, stop, err)
+			errCount++
+			lastErr = err
+			return nil
+		}
+		for _, containerInstance := range resp.ContainerInstances {
+			if containsAttribute(containerInstance.Attributes, "bottlerocket.variant") {
+				bottlerocketInstances = append(bottlerocketInstances, instance{
+					instanceID:          aws.StringValue(containerInstance.Ec2InstanceId),
+					containerInstanceID: aws.StringValue(containerInstance.ContainerInstanceArn),
+				})
+				log.Printf("Bottlerocket instance %q detected.", aws.StringValue(containerInstance.Ec2InstanceId))
+			}
+		}
+		return nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to describe container instances: %w", err)
+		return nil, err
 	}
-
-	bottlerocketInstances := make([]instance, 0)
-	// check the DescribeContainerInstances response and add only Bottlerocket instances to the list
-	for _, containerInstance := range resp.ContainerInstances {
-		if containsAttribute(containerInstance.Attributes, "bottlerocket.variant") {
-			bottlerocketInstances = append(bottlerocketInstances, instance{
-				instanceID:          aws.StringValue(containerInstance.Ec2InstanceId),
-				containerInstanceID: aws.StringValue(containerInstance.ContainerInstanceArn),
-			})
-			log.Printf("Bottlerocket instance %q detected", aws.StringValue(containerInstance.Ec2InstanceId))
-		}
+	// check if every page had an error; errors are only fatal if each page failed.
+	if errCount == pageCount {
+		return nil, fmt.Errorf("failed to describe any container instances: %w", lastErr)
 	}
 	return bottlerocketInstances, nil
 }
@@ -110,6 +128,22 @@ func containsAttribute(attrs []*ecs.Attribute, searchString string) bool {
 	return false
 }
 
+// eachPage defines batch processing boundaries for handling paginated results of API calls.
+func eachPage(inputLen int, size int, fn func(start, stop int) error) (int, error) {
+	pageCount := 0
+	for start := 0; start < inputLen; start += size {
+		stop := start + size
+		if stop > inputLen {
+			stop = inputLen
+		}
+		if err := fn(start, stop); err != nil {
+			return 0, err
+		}
+		pageCount++
+	}
+	return pageCount, nil
+}
+
 // filterAvailableUpdates returns a list of instances that have updates available
 func (u *updater) filterAvailableUpdates(bottlerocketInstances []instance) ([]instance, error) {
 	log.Printf("Filtering instances with available updates")
@@ -119,27 +153,42 @@ func (u *updater) filterAvailableUpdates(bottlerocketInstances []instance) ([]in
 		instances = append(instances, inst.instanceID)
 	}
 
-	commandID, err := u.sendCommand(instances, u.checkDocument)
+	var lastErr error
+	errCount := 0
+	candidates := make([]instance, 0)
+	pageCount, err := eachPage(len(instances), ssmPageSize, func(start, stop int) error {
+		commandID, err := u.sendCommand(instances[start:stop], u.checkDocument)
+		if err != nil {
+			// errors here are considered non-fatal.
+			log.Printf("Failed to send document %s: %v", u.checkDocument, err)
+			errCount++
+			lastErr = err
+			return nil
+		}
+		for _, inst := range bottlerocketInstances[start:stop] {
+			commandOutput, err := u.getCommandResult(commandID, inst.instanceID)
+			if err != nil {
+				// errors here are considered non-fatal
+				log.Printf("Failed to get output for command %s, document %s and instance %q: %v", commandID, u.checkDocument, inst, err)
+				continue
+			}
+			output, err := parseCommandOutput(commandOutput)
+			if err != nil {
+				log.Printf("Failed to parse command output %q for instance %q: %v", string(commandOutput), inst, err)
+				continue
+			}
+			if output.UpdateState == updateStateAvailable || output.UpdateState == updateStateReady {
+				inst.bottlerocketVersion = output.ActivePartition.Image.Version
+				candidates = append(candidates, inst)
+			}
+		}
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
-
-	candidates := make([]instance, 0)
-	for _, inst := range bottlerocketInstances {
-		commandOutput, err := u.getCommandResult(commandID, inst.instanceID)
-		if err != nil {
-			return nil, err
-		}
-		output, err := parseCommandOutput(commandOutput)
-		if err != nil {
-			// not a fatal error, we can continue checking other instances.
-			log.Printf("Failed to parse command output %q: %v", string(commandOutput), err)
-			continue
-		}
-		if output.UpdateState == updateStateAvailable || output.UpdateState == updateStateReady {
-			inst.bottlerocketVersion = output.ActivePartition.Image.Version
-			candidates = append(candidates, inst)
-		}
+	if errCount == pageCount {
+		return nil, fmt.Errorf("all attempts to send SSM document %s failed: %w", u.checkDocument, lastErr)
 	}
 	return candidates, nil
 }
