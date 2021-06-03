@@ -61,3 +61,9 @@ Resources:
           LaunchTemplateSpecification:
             LaunchTemplateId: !Ref LaunchTemplate
             Version: !GetAtt LaunchTemplate.LatestVersionNumber
+Outputs:
+  AutoScalingGroupName:
+    Description: 'Auto scaling group name'
+    Value: !Ref AutoScalingGroup
+    Export:
+      Name: !Sub "${AWS::StackName}:AutoScalingGroup"
