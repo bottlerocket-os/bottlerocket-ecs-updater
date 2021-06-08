@@ -55,27 +55,29 @@ type SSMAPI interface {
 }
 
 func (u *updater) listContainerInstances() ([]*string, error) {
+	log.Printf("Listing active container instances in cluster %q", u.cluster)
 	resp, err := u.ecs.ListContainerInstances(&ecs.ListContainerInstancesInput{
 		Cluster:    &u.cluster,
 		MaxResults: aws.Int64(pageSize),
 		Status:     aws.String("ACTIVE"),
 	})
 	if err != nil {
-		return nil, fmt.Errorf("cannot list container instances: %w", err)
+		return nil, fmt.Errorf("failed to list container instances: %w", err)
 	}
-	log.Printf("%#v", resp)
+	log.Printf("Found %d container instances in the cluster", len(resp.ContainerInstanceArns))
 	return resp.ContainerInstanceArns, nil
 }
 
 // filterBottlerocketInstances filters container instances and returns list of
 // instances that are running Bottlerocket OS
 func (u *updater) filterBottlerocketInstances(instances []*string) ([]instance, error) {
+	log.Printf("Filtering container instances running Bottlerocket OS")
 	resp, err := u.ecs.DescribeContainerInstances(&ecs.DescribeContainerInstancesInput{
 		Cluster:            &u.cluster,
 		ContainerInstances: instances,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("cannot describe container instances: %#v", err)
+		return nil, fmt.Errorf("failed to describe container instances: %w", err)
 	}
 
 	bottlerocketInstances := make([]instance, 0)
@@ -86,7 +88,7 @@ func (u *updater) filterBottlerocketInstances(instances []*string) ([]instance, 
 				instanceID:          aws.StringValue(containerInstance.Ec2InstanceId),
 				containerInstanceID: aws.StringValue(containerInstance.ContainerInstanceArn),
 			})
-			log.Printf("Bottlerocket instance detected. Instance %s added to check updates", aws.StringValue(containerInstance.Ec2InstanceId))
+			log.Printf("Bottlerocket instance %q detected", aws.StringValue(containerInstance.Ec2InstanceId))
 		}
 	}
 	return bottlerocketInstances, nil
@@ -104,6 +106,7 @@ func containsAttribute(attrs []*ecs.Attribute, searchString string) bool {
 
 // filterAvailableUpdates returns a list of instances that have updates available
 func (u *updater) filterAvailableUpdates(bottlerocketInstances []instance) ([]instance, error) {
+	log.Printf("Filtering instances with available updates")
 	// make slice of Bottlerocket instances to use with SendCommand and checkCommandOutput
 	instances := make([]string, 0)
 	for _, inst := range bottlerocketInstances {
@@ -138,6 +141,7 @@ func (u *updater) filterAvailableUpdates(bottlerocketInstances []instance) ([]in
 // eligible checks the eligibility of container instance for update. It's eligible
 // if all the running tasks were started by a service.
 func (u *updater) eligible(containerInstance string) (bool, error) {
+	log.Printf("Checking eligiblity for update of container instance %q", containerInstance)
 	list, err := u.ecs.ListTasks(&ecs.ListTasksInput{
 		Cluster:           &u.cluster,
 		ContainerInstance: aws.String(containerInstance),
@@ -155,7 +159,7 @@ func (u *updater) eligible(containerInstance string) (bool, error) {
 		Tasks:   taskARNs,
 	})
 	if err != nil {
-		return false, fmt.Errorf("could not describe tasks: %w", err)
+		return false, fmt.Errorf("failed to describe tasks: %w", err)
 	}
 	for _, listResult := range desc.Tasks {
 		startedBy := aws.StringValue(listResult.StartedBy)
@@ -217,6 +221,7 @@ func (u *updater) activateInstance(containerInstance string) error {
 }
 
 func (u *updater) waitUntilDrained(containerInstance string) error {
+	log.Printf("Waiting for container instance %q to drain", containerInstance)
 	list, err := u.ecs.ListTasks(&ecs.ListTasksInput{
 		Cluster:           &u.cluster,
 		ContainerInstance: aws.String(containerInstance),
@@ -309,7 +314,7 @@ func (u *updater) verifyUpdate(inst instance) (bool, error) {
 	ec2IDs := []string{inst.instanceID}
 	updateStatus, err := u.sendCommand(ec2IDs, u.checkDocument)
 	if err != nil {
-		return false, fmt.Errorf("failed to send update check command: %v", err)
+		return false, fmt.Errorf("failed to send update check command: %w", err)
 	}
 
 	updateResult, err := u.getCommandResult(updateStatus, inst.instanceID)
@@ -345,11 +350,13 @@ func (u *updater) sendCommand(instanceIDs []string, ssmDocument string) (string,
 	if err != nil {
 		return "", fmt.Errorf("send command failed: %w", err)
 	}
-
 	commandID := *resp.Command.CommandId
+	log.Printf("SSM document %q posted with command id %q", ssmDocument, commandID)
+
 	// Wait for the sent commands to complete.
 	errCount := 0
 	for _, v := range instanceIDs {
+		log.Printf("Waiting for command %q to complete for instance %q", commandID, v)
 		err = u.ssm.WaitUntilCommandExecutedWithContext(aws.BackgroundContext(), &ssm.GetCommandInvocationInput{
 			CommandId:  &commandID,
 			InstanceId: &v,
@@ -365,7 +372,6 @@ func (u *updater) sendCommand(instanceIDs []string, ssmDocument string) (string,
 	if errCount == len(instanceIDs) {
 		return "", fmt.Errorf("too many failures while awaiting document execution: %w", err)
 	}
-	log.Printf("SSM document %q posted with command id %q", ssmDocument, commandID)
 	return commandID, nil
 }
 
@@ -383,6 +389,7 @@ func (u *updater) getCommandResult(commandID string, instanceID string) ([]byte,
 
 // waitUntilOk takes an EC2 ID as a parameter and waits until the specified EC2 instance is in an Ok status.
 func (u *updater) waitUntilOk(ec2ID string) error {
+	log.Printf("Waiting for instance %q to reach Ok status", ec2ID)
 	return u.ec2.WaitUntilInstanceStatusOk(&ec2.DescribeInstanceStatusInput{
 		InstanceIds: []*string{aws.String(ec2ID)},
 	})

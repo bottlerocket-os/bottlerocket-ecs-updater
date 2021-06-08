@@ -131,7 +131,7 @@ func TestListContainerInstances(t *testing.T) {
 		{
 			name:          "list fail",
 			listError:     errors.New("failed to list instances"),
-			expectedError: "cannot list container instances",
+			expectedError: "failed to list container instances",
 		},
 	}
 
