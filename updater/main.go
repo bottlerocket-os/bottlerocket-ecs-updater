@@ -30,7 +30,7 @@ type updater struct {
 	rebootDocument string
 	ecs            ECSAPI
 	ssm            SSMAPI
-	ec2            *ec2.EC2
+	ec2            EC2API
 }
 
 func main() {
