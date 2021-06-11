@@ -3,6 +3,7 @@ package main
 import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/request"
+	"github.com/aws/aws-sdk-go/service/ec2"
 	"github.com/aws/aws-sdk-go/service/ecs"
 	"github.com/aws/aws-sdk-go/service/ssm"
 )
@@ -25,6 +26,12 @@ type MockSSM struct {
 }
 
 var _ SSMAPI = (*MockSSM)(nil)
+
+type MockEC2 struct {
+	WaitUntilInstanceStatusOkFn func(input *ec2.DescribeInstanceStatusInput) error
+}
+
+var _ EC2API = (*MockEC2)(nil)
 
 func (m MockECS) ListContainerInstances(input *ecs.ListContainerInstancesInput) (*ecs.ListContainerInstancesOutput, error) {
 	return m.ListContainerInstancesFn(input)
@@ -60,4 +67,8 @@ func (m MockSSM) WaitUntilCommandExecutedWithContext(ctx aws.Context, input *ssm
 
 func (m MockSSM) GetCommandInvocation(input *ssm.GetCommandInvocationInput) (*ssm.GetCommandInvocationOutput, error) {
 	return m.GetCommandInvocationFn(input)
+}
+
+func (c MockEC2) WaitUntilInstanceStatusOk(input *ec2.DescribeInstanceStatusInput) error {
+	return c.WaitUntilInstanceStatusOkFn(input)
 }

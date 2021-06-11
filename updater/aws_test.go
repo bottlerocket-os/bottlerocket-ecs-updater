@@ -7,6 +7,7 @@ import (
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/request"
+	"github.com/aws/aws-sdk-go/service/ec2"
 	"github.com/aws/aws-sdk-go/service/ecs"
 	"github.com/aws/aws-sdk-go/service/ssm"
 	"github.com/stretchr/testify/assert"
@@ -499,5 +500,395 @@ func TestDrainInstance(t *testing.T) {
 		require.Error(t, err)
 		assert.ErrorIs(t, err, waitTaskErr)
 		assert.Equal(t, []string{"DRAINING", "ACTIVE"}, stateChangeCalls)
+	})
+}
+
+func TestUpdateInstance(t *testing.T) {
+	checkPattern := "{\"update_state\": \"%s\", \"active_partition\": { \"image\": { \"version\": \"0.0.0\"}}}"
+	cases := []struct {
+		name                        string
+		invocationOut               *ssm.GetCommandInvocationOutput
+		expectedSSMCommandCallOrder []string
+		expectedErr                 string
+	}{
+		{
+			name: "update state available",
+			invocationOut: &ssm.GetCommandInvocationOutput{
+				StandardOutputContent: aws.String(fmt.Sprintf(checkPattern, updateStateAvailable)),
+			},
+			expectedSSMCommandCallOrder: []string{"check-document", "apply-document", "reboot-document"},
+		}, {
+			name: "update state ready",
+			invocationOut: &ssm.GetCommandInvocationOutput{
+				StandardOutputContent: aws.String(fmt.Sprintf(checkPattern, updateStateReady)),
+			},
+			expectedSSMCommandCallOrder: []string{"check-document", "reboot-document"},
+		}, {
+			name: "update state idle",
+			invocationOut: &ssm.GetCommandInvocationOutput{
+				StandardOutputContent: aws.String(fmt.Sprintf(checkPattern, updateStateIdle)),
+			},
+			expectedSSMCommandCallOrder: []string{"check-document"},
+		}, {
+			name: "update state staged",
+			invocationOut: &ssm.GetCommandInvocationOutput{
+				StandardOutputContent: aws.String(fmt.Sprintf(checkPattern, updateStateStaged)),
+			},
+			expectedSSMCommandCallOrder: []string{"check-document"},
+			expectedErr:                 "unexpected update state \"Staged\"; skipping instance",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ssmCommandCallOrder := []string{}
+			mockSSM := MockSSM{
+				SendCommandFn: func(input *ssm.SendCommandInput) (*ssm.SendCommandOutput, error) {
+					ssmCommandCallOrder = append(ssmCommandCallOrder, aws.StringValue(input.DocumentName))
+					assert.Equal(t, []*string{aws.String("instance-id")}, input.InstanceIds)
+					return &ssm.SendCommandOutput{
+						Command: &ssm.Command{
+							CommandId: aws.String("command-id"),
+						},
+					}, nil
+				},
+				GetCommandInvocationFn: func(input *ssm.GetCommandInvocationInput) (*ssm.GetCommandInvocationOutput, error) {
+					assert.Equal(t, "command-id", aws.StringValue(input.CommandId))
+					assert.Equal(t, "instance-id", aws.StringValue(input.InstanceId))
+					return tc.invocationOut, nil
+				},
+				WaitUntilCommandExecutedWithContextFn: func(ctx aws.Context, input *ssm.GetCommandInvocationInput, opts ...request.WaiterOption) error {
+					assert.Equal(t, "command-id", aws.StringValue(input.CommandId))
+					assert.Equal(t, "instance-id", aws.StringValue(input.InstanceId))
+					return nil
+				},
+			}
+			mockEC2 := MockEC2{
+				WaitUntilInstanceStatusOkFn: func(input *ec2.DescribeInstanceStatusInput) error {
+					assert.Equal(t, []*string{aws.String("instance-id")}, input.InstanceIds)
+					return nil
+				},
+			}
+			u := updater{ssm: mockSSM, ec2: mockEC2, checkDocument: "check-document", applyDocument: "apply-document", rebootDocument: "reboot-document"}
+			err := u.updateInstance(instance{
+				instanceID:          "instance-id",
+				containerInstanceID: "cont-inst-id",
+				bottlerocketVersion: "v0.1.0",
+			})
+			if tc.expectedErr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.expectedErr)
+			} else {
+				require.NoError(t, err)
+			}
+			assert.Equal(t, tc.expectedSSMCommandCallOrder, ssmCommandCallOrder)
+		})
+	}
+}
+
+func TestUpdateInstanceErr(t *testing.T) {
+	commandOutput := &ssm.SendCommandOutput{
+		Command: &ssm.Command{
+			CommandId: aws.String("command-id"),
+		},
+	}
+	mockSendCommand := func(input *ssm.SendCommandInput) (*ssm.SendCommandOutput, error) {
+		assert.Equal(t, []*string{aws.String("instance-id")}, input.InstanceIds)
+		return commandOutput, nil
+	}
+	mockGetCommandInvocation := func(input *ssm.GetCommandInvocationInput) (*ssm.GetCommandInvocationOutput, error) {
+		assert.Equal(t, "command-id", aws.StringValue(input.CommandId))
+		assert.Equal(t, "instance-id", aws.StringValue(input.InstanceId))
+		return &ssm.GetCommandInvocationOutput{
+			StandardOutputContent: aws.String("{\"update_state\": \"Available\", \"active_partition\": { \"image\": { \"version\": \"0.0.0\"}}}"),
+		}, nil
+	}
+	mockWaitCommandExecution := func(ctx aws.Context, input *ssm.GetCommandInvocationInput, opts ...request.WaiterOption) error {
+		assert.Equal(t, "command-id", aws.StringValue(input.CommandId))
+		assert.Equal(t, "instance-id", aws.StringValue(input.InstanceId))
+		return nil
+	}
+
+	t.Run("check err", func(t *testing.T) {
+		checkErr := errors.New("failed to send check command")
+		mockSSM := MockSSM{
+			SendCommandFn: func(input *ssm.SendCommandInput) (*ssm.SendCommandOutput, error) {
+				assert.Equal(t, "check-document", aws.StringValue(input.DocumentName))
+				assert.Equal(t, []*string{aws.String("instance-id")}, input.InstanceIds)
+				return nil, checkErr
+			},
+		}
+		u := updater{ssm: mockSSM, checkDocument: "check-document"}
+		err := u.updateInstance(instance{
+			instanceID:          "instance-id",
+			containerInstanceID: "cont-inst-id",
+		})
+		require.Error(t, err)
+		assert.ErrorIs(t, err, checkErr)
+	})
+	t.Run("apply err", func(t *testing.T) {
+		applyErr := errors.New("failed to send apply command")
+		mockSSM := MockSSM{
+			SendCommandFn: func(input *ssm.SendCommandInput) (*ssm.SendCommandOutput, error) {
+				assert.Equal(t, []*string{aws.String("instance-id")}, input.InstanceIds)
+				if aws.StringValue(input.DocumentName) == "apply-document" {
+					return nil, applyErr
+				}
+				return commandOutput, nil
+			},
+			GetCommandInvocationFn:                mockGetCommandInvocation,
+			WaitUntilCommandExecutedWithContextFn: mockWaitCommandExecution,
+		}
+		u := updater{ssm: mockSSM, checkDocument: "check-document", applyDocument: "apply-document"}
+		err := u.updateInstance(instance{
+			instanceID:          "instance-id",
+			containerInstanceID: "cont-inst-id",
+		})
+		require.Error(t, err)
+		assert.ErrorIs(t, err, applyErr)
+	})
+	t.Run("reboot err", func(t *testing.T) {
+		rebootErr := errors.New("failed to send reboot command")
+		mockSSM := MockSSM{
+			SendCommandFn: func(input *ssm.SendCommandInput) (*ssm.SendCommandOutput, error) {
+				assert.Equal(t, []*string{aws.String("instance-id")}, input.InstanceIds)
+				if aws.StringValue(input.DocumentName) == "reboot-document" {
+					return nil, rebootErr
+				}
+				return commandOutput, nil
+			},
+			GetCommandInvocationFn:                mockGetCommandInvocation,
+			WaitUntilCommandExecutedWithContextFn: mockWaitCommandExecution,
+		}
+		u := updater{ssm: mockSSM, checkDocument: "check-document", applyDocument: "apply-document", rebootDocument: "reboot-document"}
+		err := u.updateInstance(instance{
+			instanceID:          "instance-id",
+			containerInstanceID: "cont-inst-id",
+		})
+		require.Error(t, err)
+		assert.ErrorIs(t, err, rebootErr)
+	})
+	t.Run("invocation err", func(t *testing.T) {
+		ssmGetInvocationErr := errors.New("failed to get command invocation")
+		mockSSM := MockSSM{
+			SendCommandFn: mockSendCommand,
+			GetCommandInvocationFn: func(input *ssm.GetCommandInvocationInput) (*ssm.GetCommandInvocationOutput, error) {
+				assert.Equal(t, "command-id", aws.StringValue(input.CommandId))
+				assert.Equal(t, "instance-id", aws.StringValue(input.InstanceId))
+				return nil, ssmGetInvocationErr
+			},
+			WaitUntilCommandExecutedWithContextFn: mockWaitCommandExecution,
+		}
+		u := updater{ssm: mockSSM, checkDocument: "check-document"}
+		err := u.updateInstance(instance{
+			instanceID:          "instance-id",
+			containerInstanceID: "cont-inst-id",
+		})
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ssmGetInvocationErr)
+	})
+	t.Run("wait ssm err", func(t *testing.T) {
+		waitExecErr := errors.New("failed to wait ssm execution complete")
+		mockSSM := MockSSM{
+			SendCommandFn: mockSendCommand,
+			WaitUntilCommandExecutedWithContextFn: func(ctx aws.Context, input *ssm.GetCommandInvocationInput, opts ...request.WaiterOption) error {
+				assert.Equal(t, "command-id", aws.StringValue(input.CommandId))
+				assert.Equal(t, "instance-id", aws.StringValue(input.InstanceId))
+				return waitExecErr
+			},
+		}
+		u := updater{ssm: mockSSM, checkDocument: "check-document"}
+		err := u.updateInstance(instance{
+			instanceID:          "instance-id",
+			containerInstanceID: "cont-inst-id",
+		})
+		require.Error(t, err)
+		assert.ErrorIs(t, err, waitExecErr)
+	})
+	t.Run("wait instance ok err", func(t *testing.T) {
+		waitErr := errors.New("failed to wait instance ok")
+		mockSSM := MockSSM{
+			SendCommandFn:                         mockSendCommand,
+			GetCommandInvocationFn:                mockGetCommandInvocation,
+			WaitUntilCommandExecutedWithContextFn: mockWaitCommandExecution,
+		}
+
+		mockEC2 := MockEC2{
+			WaitUntilInstanceStatusOkFn: func(input *ec2.DescribeInstanceStatusInput) error {
+				assert.Equal(t, []*string{aws.String("instance-id")}, input.InstanceIds)
+				return waitErr
+			},
+		}
+		u := updater{ssm: mockSSM, ec2: mockEC2, checkDocument: "check-document", applyDocument: "apply-document", rebootDocument: "reboot-document"}
+		err := u.updateInstance(instance{
+			instanceID:          "instance-id",
+			containerInstanceID: "cont-inst-id",
+		})
+		require.Error(t, err)
+		assert.ErrorIs(t, err, waitErr)
+	})
+}
+
+func TestVerifyUpdate(t *testing.T) {
+	checkPattern := "{\"update_state\": \"%s\", \"active_partition\": { \"image\": { \"version\": \"%s\"}}}"
+	cases := []struct {
+		name          string
+		invocationOut *ssm.GetCommandInvocationOutput
+		expectedOk    bool
+	}{
+		{
+			name: "verify success",
+			invocationOut: &ssm.GetCommandInvocationOutput{
+				StandardOutputContent: aws.String(fmt.Sprintf(checkPattern, updateStateIdle, "0.0.1")),
+			},
+			expectedOk: true,
+		},
+		{
+			name: "version is same",
+			invocationOut: &ssm.GetCommandInvocationOutput{
+				StandardOutputContent: aws.String(fmt.Sprintf(checkPattern, updateStateIdle, "0.0.0")),
+			},
+			expectedOk: false,
+		},
+		{
+			name: "another version is available",
+			invocationOut: &ssm.GetCommandInvocationOutput{
+				StandardOutputContent: aws.String(fmt.Sprintf(checkPattern, updateStateAvailable, "0.0.1")),
+			},
+			expectedOk: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mockSSM := MockSSM{
+				SendCommandFn: func(input *ssm.SendCommandInput) (*ssm.SendCommandOutput, error) {
+					assert.Equal(t, "check-document", aws.StringValue(input.DocumentName))
+					return &ssm.SendCommandOutput{
+						Command: &ssm.Command{
+							CommandId: aws.String("command-id"),
+						},
+					}, nil
+				},
+				GetCommandInvocationFn: func(input *ssm.GetCommandInvocationInput) (*ssm.GetCommandInvocationOutput, error) {
+					assert.Equal(t, "command-id", aws.StringValue(input.CommandId))
+					assert.Equal(t, "instance-id", aws.StringValue(input.InstanceId))
+					return tc.invocationOut, nil
+				},
+				WaitUntilCommandExecutedWithContextFn: func(ctx aws.Context, input *ssm.GetCommandInvocationInput, opts ...request.WaiterOption) error {
+					assert.Equal(t, "command-id", aws.StringValue(input.CommandId))
+					assert.Equal(t, "instance-id", aws.StringValue(input.InstanceId))
+					return nil
+				},
+			}
+			u := updater{ssm: mockSSM, checkDocument: "check-document"}
+			ok, err := u.verifyUpdate(instance{
+				instanceID:          "instance-id",
+				containerInstanceID: "cont-inst-id",
+				bottlerocketVersion: "0.0.0",
+			})
+			require.NoError(t, err)
+			assert.Equal(t, tc.expectedOk, ok)
+		})
+	}
+}
+
+func TestVerifyUpdateErr(t *testing.T) {
+	mockSSMCommandOut := func(input *ssm.SendCommandInput) (*ssm.SendCommandOutput, error) {
+		assert.Equal(t, "check-document", aws.StringValue(input.DocumentName))
+		assert.Equal(t, 1, len(input.InstanceIds))
+		assert.Equal(t, "instance-id", aws.StringValue(input.InstanceIds[0]))
+		return &ssm.SendCommandOutput{
+			Command: &ssm.Command{
+				CommandId: aws.String("command-id"),
+			},
+		}, nil
+	}
+	mockWaitCommandExecution := func(ctx aws.Context, input *ssm.GetCommandInvocationInput, opts ...request.WaiterOption) error {
+		assert.Equal(t, "command-id", aws.StringValue(input.CommandId))
+		assert.Equal(t, "instance-id", aws.StringValue(input.InstanceId))
+		return nil
+	}
+	mockGetCommandInvocation := func(input *ssm.GetCommandInvocationInput) (*ssm.GetCommandInvocationOutput, error) {
+		assert.Equal(t, "command-id", aws.StringValue(input.CommandId))
+		assert.Equal(t, "instance-id", aws.StringValue(input.InstanceId))
+		return &ssm.GetCommandInvocationOutput{}, nil
+	}
+	t.Run("check err", func(t *testing.T) {
+		ssmCheckErr := errors.New("failed to send check command")
+		mockSSM := MockSSM{
+			SendCommandFn: func(input *ssm.SendCommandInput) (*ssm.SendCommandOutput, error) {
+				assert.Equal(t, "check-document", aws.StringValue(input.DocumentName))
+				assert.Equal(t, 1, len(input.InstanceIds))
+				assert.Equal(t, "instance-id", aws.StringValue(input.InstanceIds[0]))
+				return nil, ssmCheckErr
+			},
+		}
+		u := updater{ssm: mockSSM, checkDocument: "check-document"}
+		ok, err := u.verifyUpdate(instance{
+			instanceID:          "instance-id",
+			containerInstanceID: "cont-inst-id",
+			bottlerocketVersion: "0.0.0",
+		})
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ssmCheckErr)
+		assert.False(t, ok)
+	})
+	t.Run("wait ssm err", func(t *testing.T) {
+		waitExecErr := errors.New("failed to wait ssm execution complete")
+		mockSSM := MockSSM{
+			SendCommandFn: mockSSMCommandOut,
+			WaitUntilCommandExecutedWithContextFn: func(ctx aws.Context, input *ssm.GetCommandInvocationInput, opts ...request.WaiterOption) error {
+				assert.Equal(t, "command-id", aws.StringValue(input.CommandId))
+				assert.Equal(t, "instance-id", aws.StringValue(input.InstanceId))
+				return waitExecErr
+			},
+		}
+		u := updater{ssm: mockSSM, checkDocument: "check-document"}
+		ok, err := u.verifyUpdate(instance{
+			instanceID:          "instance-id",
+			containerInstanceID: "cont-inst-id",
+			bottlerocketVersion: "0.0.0",
+		})
+		require.Error(t, err)
+		assert.ErrorIs(t, err, waitExecErr)
+		assert.False(t, ok)
+	})
+	t.Run("invocation err", func(t *testing.T) {
+		ssmGetInvocationErr := errors.New("failed to get command invocation")
+		mockSSM := MockSSM{
+			SendCommandFn:                         mockSSMCommandOut,
+			WaitUntilCommandExecutedWithContextFn: mockWaitCommandExecution,
+			GetCommandInvocationFn: func(input *ssm.GetCommandInvocationInput) (*ssm.GetCommandInvocationOutput, error) {
+				assert.Equal(t, "command-id", aws.StringValue(input.CommandId))
+				assert.Equal(t, "instance-id", aws.StringValue(input.InstanceId))
+				return nil, ssmGetInvocationErr
+			},
+		}
+		u := updater{ssm: mockSSM, checkDocument: "check-document"}
+		ok, err := u.verifyUpdate(instance{
+			instanceID:          "instance-id",
+			containerInstanceID: "cont-inst-id",
+			bottlerocketVersion: "0.0.0",
+		})
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ssmGetInvocationErr)
+		assert.False(t, ok)
+	})
+
+	t.Run("parse output err", func(t *testing.T) {
+		mockSSM := MockSSM{
+			SendCommandFn:                         mockSSMCommandOut,
+			WaitUntilCommandExecutedWithContextFn: mockWaitCommandExecution,
+			GetCommandInvocationFn:                mockGetCommandInvocation,
+		}
+		u := updater{ssm: mockSSM, checkDocument: "check-document"}
+		ok, err := u.verifyUpdate(instance{
+			instanceID:          "instance-id",
+			containerInstanceID: "cont-inst-id",
+			bottlerocketVersion: "0.0.0",
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to parse command output , manual verification required")
+		assert.False(t, ok)
 	})
 }

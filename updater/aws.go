@@ -54,6 +54,10 @@ type SSMAPI interface {
 	GetCommandInvocation(input *ssm.GetCommandInvocationInput) (*ssm.GetCommandInvocationOutput, error)
 }
 
+type EC2API interface {
+	WaitUntilInstanceStatusOk(input *ec2.DescribeInstanceStatusInput) error
+}
+
 func (u *updater) listContainerInstances() ([]*string, error) {
 	log.Printf("Listing active container instances in cluster %q", u.cluster)
 	resp, err := u.ecs.ListContainerInstances(&ecs.ListContainerInstancesInput{
