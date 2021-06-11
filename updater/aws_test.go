@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -212,4 +213,291 @@ func TestFilterBottlerocketInstances(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.EqualValues(t, expected, actual)
+}
+
+func TestEligible(t *testing.T) {
+	cases := []struct {
+		name        string
+		listOut     *ecs.ListTasksOutput
+		describeOut *ecs.DescribeTasksOutput
+		expectedOk  bool
+	}{
+		{
+			name: "only service tasks",
+			listOut: &ecs.ListTasksOutput{
+				TaskArns: []*string{
+					aws.String("task-arn-1"),
+				},
+			},
+			describeOut: &ecs.DescribeTasksOutput{
+				Tasks: []*ecs.Task{
+					{
+						// contains proper prefix "ecs-svc" for task started by service
+						StartedBy: aws.String("ecs-svc/svc-id"),
+					},
+				},
+			},
+			expectedOk: true,
+		}, {
+			name: "no task",
+			listOut: &ecs.ListTasksOutput{
+				TaskArns: []*string{},
+			},
+			expectedOk: true,
+		}, {
+			name: "non service task",
+			listOut: &ecs.ListTasksOutput{
+				TaskArns: []*string{
+					aws.String("task-arn-1"),
+				},
+			},
+			describeOut: &ecs.DescribeTasksOutput{
+				Tasks: []*ecs.Task{{
+					// Does not contain prefix "ecs-svc"
+					StartedBy: aws.String("standalone-task-id"),
+				}},
+			},
+			expectedOk: false,
+		}, {
+			name: "non service task empty StartedBy",
+			listOut: &ecs.ListTasksOutput{
+				TaskArns: []*string{
+					aws.String("task-arn-1"),
+				},
+			},
+			describeOut: &ecs.DescribeTasksOutput{
+				Tasks: []*ecs.Task{{}},
+			},
+			expectedOk: false,
+		}, {
+			name: "service and non service tasks",
+			listOut: &ecs.ListTasksOutput{
+				TaskArns: []*string{
+					aws.String("task-arn-1"),
+					aws.String("task-arn-2"),
+				},
+			},
+			describeOut: &ecs.DescribeTasksOutput{
+				Tasks: []*ecs.Task{{
+					// Does not contain prefix "ecs-svc"
+					StartedBy: aws.String("standalone-task-id"),
+				}, {
+					// contains proper prefix "ecs-svc" for task started by service
+					StartedBy: aws.String("ecs-svc/svc-id"),
+				}},
+			},
+			expectedOk: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mockECS := MockECS{
+				ListTasksFn: func(input *ecs.ListTasksInput) (*ecs.ListTasksOutput, error) {
+					assert.Equal(t, "test-cluster", aws.StringValue(input.Cluster))
+					assert.Equal(t, "cont-inst-id", aws.StringValue(input.ContainerInstance))
+					return tc.listOut, nil
+				},
+				DescribeTasksFn: func(input *ecs.DescribeTasksInput) (*ecs.DescribeTasksOutput, error) {
+					assert.Equal(t, "test-cluster", aws.StringValue(input.Cluster))
+					assert.Equal(t, tc.listOut.TaskArns, input.Tasks)
+					return tc.describeOut, nil
+				},
+			}
+			u := updater{ecs: mockECS, cluster: "test-cluster"}
+			ok, err := u.eligible("cont-inst-id")
+			require.NoError(t, err)
+			assert.Equal(t, ok, tc.expectedOk)
+		})
+	}
+}
+
+func TestEligibleErr(t *testing.T) {
+	t.Run("list task err", func(t *testing.T) {
+		listErr := errors.New("failed to list tasks")
+		mockECS := MockECS{
+			ListTasksFn: func(input *ecs.ListTasksInput) (*ecs.ListTasksOutput, error) {
+				assert.Equal(t, "test-cluster", aws.StringValue(input.Cluster))
+				assert.Equal(t, "cont-inst-id", aws.StringValue(input.ContainerInstance))
+				return nil, listErr
+			},
+		}
+		u := updater{ecs: mockECS, cluster: "test-cluster"}
+		ok, err := u.eligible("cont-inst-id")
+		require.Error(t, err)
+		assert.ErrorIs(t, err, listErr)
+		assert.False(t, ok)
+	})
+
+	t.Run("describe task err", func(t *testing.T) {
+		describeErr := errors.New("failed to describe tasks")
+		mockECS := MockECS{
+			ListTasksFn: func(input *ecs.ListTasksInput) (*ecs.ListTasksOutput, error) {
+				assert.Equal(t, "test-cluster", aws.StringValue(input.Cluster))
+				assert.Equal(t, "cont-inst-id", aws.StringValue(input.ContainerInstance))
+				return &ecs.ListTasksOutput{
+					TaskArns: []*string{
+						aws.String("task-arn-1"),
+					},
+				}, nil
+			},
+			DescribeTasksFn: func(input *ecs.DescribeTasksInput) (*ecs.DescribeTasksOutput, error) {
+				assert.Equal(t, "test-cluster", aws.StringValue(input.Cluster))
+				assert.Equal(t, []*string{
+					aws.String("task-arn-1"),
+				}, input.Tasks)
+				return nil, describeErr
+			},
+		}
+		u := updater{ecs: mockECS, cluster: "test-cluster"}
+		ok, err := u.eligible("cont-inst-id")
+		require.Error(t, err)
+		assert.ErrorIs(t, err, describeErr)
+		assert.False(t, ok)
+	})
+}
+
+func TestDrainInstance(t *testing.T) {
+	stateChangeCalls := []string{}
+	mockStateChange := func(input *ecs.UpdateContainerInstancesStateInput) (*ecs.UpdateContainerInstancesStateOutput, error) {
+		stateChangeCalls = append(stateChangeCalls, aws.StringValue(input.Status))
+		assert.Equal(t, "test-cluster", aws.StringValue(input.Cluster))
+		assert.Equal(t, []*string{aws.String("cont-inst-id")}, input.ContainerInstances)
+		return &ecs.UpdateContainerInstancesStateOutput{
+			Failures: []*ecs.Failure{},
+		}, nil
+	}
+	mockListTasks := func(input *ecs.ListTasksInput) (*ecs.ListTasksOutput, error) {
+		assert.Equal(t, "test-cluster", aws.StringValue(input.Cluster))
+		assert.Equal(t, "cont-inst-id", aws.StringValue(input.ContainerInstance))
+		return &ecs.ListTasksOutput{
+			TaskArns: []*string{
+				aws.String("task-arn-1"),
+			},
+		}, nil
+	}
+	cleanup := func() {
+		stateChangeCalls = []string{}
+	}
+
+	t.Run("no tasks success", func(t *testing.T) {
+		defer cleanup()
+		listTaskCount := 0
+		mockECS := MockECS{
+			UpdateContainerInstancesStateFn: mockStateChange,
+			ListTasksFn: func(input *ecs.ListTasksInput) (*ecs.ListTasksOutput, error) {
+				assert.Equal(t, "test-cluster", aws.StringValue(input.Cluster))
+				assert.Equal(t, "cont-inst-id", aws.StringValue(input.ContainerInstance))
+				listTaskCount++
+				return &ecs.ListTasksOutput{
+					TaskArns: []*string{},
+				}, nil
+			},
+		}
+		u := updater{ecs: mockECS, cluster: "test-cluster"}
+		err := u.drainInstance("cont-inst-id")
+		require.NoError(t, err)
+		assert.Equal(t, 1, listTaskCount)
+		assert.Equal(t, []string{"DRAINING"}, stateChangeCalls)
+	})
+
+	t.Run("with tasks success", func(t *testing.T) {
+		defer cleanup()
+		waitCount := 0
+		mockECS := MockECS{
+			UpdateContainerInstancesStateFn: mockStateChange,
+			ListTasksFn:                     mockListTasks,
+			WaitUntilTasksStoppedWithContextFn: func(ctx aws.Context, input *ecs.DescribeTasksInput, opts ...request.WaiterOption) error {
+				assert.Equal(t, []*string{
+					aws.String("task-arn-1"),
+				}, input.Tasks)
+				assert.Equal(t, "test-cluster", aws.StringValue(input.Cluster))
+				waitCount++
+				return nil
+			},
+		}
+		u := updater{ecs: mockECS, cluster: "test-cluster"}
+		err := u.drainInstance("cont-inst-id")
+		require.NoError(t, err)
+		assert.Equal(t, []string{"DRAINING"}, stateChangeCalls)
+		assert.Equal(t, 1, waitCount)
+	})
+
+	t.Run("state change err", func(t *testing.T) {
+		defer cleanup()
+		stateOutErr := errors.New("failed to change state")
+		mockECS := MockECS{
+			UpdateContainerInstancesStateFn: func(input *ecs.UpdateContainerInstancesStateInput) (*ecs.UpdateContainerInstancesStateOutput, error) {
+				assert.Equal(t, "test-cluster", aws.StringValue(input.Cluster))
+				assert.Equal(t, []*string{aws.String("cont-inst-id")}, input.ContainerInstances)
+				return nil, stateOutErr
+			},
+		}
+		u := updater{ecs: mockECS, cluster: "test-cluster"}
+		err := u.drainInstance("cont-inst-id")
+		require.Error(t, err)
+		assert.ErrorIs(t, err, stateOutErr)
+	})
+
+	t.Run("state change api err", func(t *testing.T) {
+		defer cleanup()
+		stateOutAPIFailure := &ecs.UpdateContainerInstancesStateOutput{
+			Failures: []*ecs.Failure{
+				{
+					Reason: aws.String("failed"),
+				},
+			},
+		}
+		mockECS := MockECS{
+			UpdateContainerInstancesStateFn: func(input *ecs.UpdateContainerInstancesStateInput) (*ecs.UpdateContainerInstancesStateOutput, error) {
+				stateChangeCalls = append(stateChangeCalls, aws.StringValue(input.Status))
+				assert.Equal(t, "test-cluster", aws.StringValue(input.Cluster))
+				assert.Equal(t, []*string{aws.String("cont-inst-id")}, input.ContainerInstances)
+				return stateOutAPIFailure, nil
+			},
+		}
+		u := updater{ecs: mockECS, cluster: "test-cluster"}
+		err := u.drainInstance("cont-inst-id")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), fmt.Sprintf("%v", stateOutAPIFailure.Failures))
+		assert.Equal(t, []string{"DRAINING", "ACTIVE"}, stateChangeCalls)
+	})
+
+	t.Run("list task err", func(t *testing.T) {
+		defer cleanup()
+		listTaskErr := errors.New("failed to list tasks")
+		mockECS := MockECS{
+			UpdateContainerInstancesStateFn: mockStateChange,
+			ListTasksFn: func(input *ecs.ListTasksInput) (*ecs.ListTasksOutput, error) {
+				assert.Equal(t, "test-cluster", aws.StringValue(input.Cluster))
+				assert.Equal(t, "cont-inst-id", aws.StringValue(input.ContainerInstance))
+				return nil, listTaskErr
+			},
+		}
+		u := updater{ecs: mockECS, cluster: "test-cluster"}
+		err := u.drainInstance("cont-inst-id")
+		require.Error(t, err)
+		assert.ErrorIs(t, err, listTaskErr)
+		assert.Equal(t, []string{"DRAINING", "ACTIVE"}, stateChangeCalls)
+	})
+
+	t.Run("wait tasks stop err", func(t *testing.T) {
+		defer cleanup()
+		waitTaskErr := errors.New("failed to wait for tasks to stop")
+		mockECS := MockECS{
+			UpdateContainerInstancesStateFn: mockStateChange,
+			ListTasksFn:                     mockListTasks,
+			WaitUntilTasksStoppedWithContextFn: func(ctx aws.Context, input *ecs.DescribeTasksInput, opts ...request.WaiterOption) error {
+				assert.Equal(t, []*string{
+					aws.String("task-arn-1"),
+				}, input.Tasks)
+				assert.Equal(t, "test-cluster", aws.StringValue(input.Cluster))
+				return waitTaskErr
+			},
+		}
+		u := updater{ecs: mockECS, cluster: "test-cluster"}
+		err := u.drainInstance("cont-inst-id")
+		require.Error(t, err)
+		assert.ErrorIs(t, err, waitTaskErr)
+		assert.Equal(t, []string{"DRAINING", "ACTIVE"}, stateChangeCalls)
+	})
 }
