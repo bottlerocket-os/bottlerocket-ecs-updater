@@ -168,6 +168,7 @@ func (u *updater) eligible(containerInstance string) (bool, error) {
 	for _, listResult := range desc.Tasks {
 		startedBy := aws.StringValue(listResult.StartedBy)
 		if !strings.HasPrefix(startedBy, "ecs-svc/") {
+			log.Printf("Container instance %q has a non-service task running: %s", containerInstance, aws.StringValue(listResult.TaskArn))
 			return false, nil
 		}
 	}
