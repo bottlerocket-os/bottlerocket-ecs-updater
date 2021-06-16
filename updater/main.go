@@ -109,7 +109,7 @@ func _main() error {
 			continue
 		}
 		if !eligible {
-			log.Printf("Instance %#q is not eligible for updates", i)
+			log.Printf("Instance %#q is not eligible for updates because it contains non-service task", i)
 			continue
 		}
 		log.Printf("Instance %q is eligible for update", i)
