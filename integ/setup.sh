@@ -99,7 +99,8 @@ if ! aws cloudformation deploy \
     --parameter-overrides \
     IntegSharedResourceStack="${INTEG_STACK_NAME}" \
     InstanceCount="${INSTANCE_COUNT}" \
-    ImageID="${AMI_ID}"; then
+    ImageID="${AMI_ID}" \
+    InstanceType="${INSTANCE_TYPE}"; then
     log ERROR "Failed to deploy stack '${CLUSTER_STACK_TEMPLATE}' stack template"
     exit 1
 fi
