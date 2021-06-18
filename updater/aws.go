@@ -22,6 +22,8 @@ const (
 	updateStateReady     = "Ready"
 	waiterDelay          = time.Duration(15) * time.Second
 	waiterMaxAttempts    = 100
+	// If this time is reached and the ssm command has not already started running, it will not run.
+	deliveryTimeoutSeconds = 600
 )
 
 type instance struct {
@@ -296,6 +298,7 @@ func (u *updater) updateInstance(inst instance) error {
 		DocumentName:    aws.String(u.rebootDocument),
 		DocumentVersion: aws.String("$DEFAULT"),
 		InstanceIds:     aws.StringSlice(ec2IDs),
+		TimeoutSeconds:  aws.Int64(deliveryTimeoutSeconds),
 	})
 	if err != nil {
 		return fmt.Errorf("failed to send reboot command: %w", err)
@@ -351,6 +354,7 @@ func (u *updater) sendCommand(instanceIDs []string, ssmDocument string) (string,
 		DocumentName:    aws.String(ssmDocument),
 		DocumentVersion: aws.String("$DEFAULT"),
 		InstanceIds:     aws.StringSlice(instanceIDs),
+		TimeoutSeconds:  aws.Int64(deliveryTimeoutSeconds),
 	})
 	if err != nil {
 		return "", fmt.Errorf("send command failed: %w", err)
