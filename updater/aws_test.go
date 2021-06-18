@@ -14,91 +14,145 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestSendCommand(t *testing.T) {
-	// commandSuccessInstance indicates an instance for which the command should succeed
-	// regardless of whether `waitError` is set.
-	const commandSuccessInstance = "inst-success"
+func TestSendCommandSuccess(t *testing.T) {
+	instances := []string{"inst-id-1", "inst-id-2"}
+	waitInstanceIDs := []string{}
+	mockSSM := MockSSM{
+		SendCommandFn: func(input *ssm.SendCommandInput) (*ssm.SendCommandOutput, error) {
+			assert.Equal(t, "test-doc", aws.StringValue(input.DocumentName))
+			assert.Equal(t, "$DEFAULT", aws.StringValue(input.DocumentVersion))
+			assert.Equal(t, aws.StringSlice(instances), input.InstanceIds)
+			return &ssm.SendCommandOutput{Command: &ssm.Command{CommandId: aws.String("command-id")}}, nil
+		},
+		WaitUntilCommandExecutedWithContextFn: func(ctx aws.Context, input *ssm.GetCommandInvocationInput, opts ...request.WaiterOption) error {
+			assert.Equal(t, "command-id", aws.StringValue(input.CommandId))
+			waitInstanceIDs = append(waitInstanceIDs, aws.StringValue(input.InstanceId))
+			return nil
+		},
+	}
+	u := updater{ssm: mockSSM}
+	commandID, err := u.sendCommand(instances, "test-doc")
+	require.NoError(t, err)
+	assert.EqualValues(t, "command-id", commandID)
+	assert.Equal(t, instances, waitInstanceIDs)
+}
+
+func TestSendCommandErr(t *testing.T) {
+	instances := []string{"inst-id-1", "inst-id-2"}
+	sendError := errors.New("failed to send command")
+	mockSSM := MockSSM{
+		SendCommandFn: func(input *ssm.SendCommandInput) (*ssm.SendCommandOutput, error) {
+			assert.Equal(t, "test-doc", aws.StringValue(input.DocumentName))
+			assert.Equal(t, "$DEFAULT", aws.StringValue(input.DocumentVersion))
+			assert.Equal(t, aws.StringSlice(instances), input.InstanceIds)
+			return nil, sendError
+		},
+	}
+	u := updater{ssm: mockSSM}
+	commandID, err := u.sendCommand(instances, "test-doc")
+	require.Error(t, err)
+	assert.Equal(t, "", commandID)
+	assert.ErrorIs(t, err, sendError)
+
+}
+
+func TestSendCommandWaitErr(t *testing.T) {
 	cases := []struct {
-		name          string
-		sendOutput    *ssm.SendCommandOutput
-		sendError     error
-		expectedError string
-		expectedOut   string
-		waitError     error
-		instances     []string
+		name      string
+		instances []string
 	}{
 		{
-			name: "send success",
-			sendOutput: &ssm.SendCommandOutput{
-				Command: &ssm.Command{CommandId: aws.String("id1")},
-			},
-			instances:   []string{"inst-id-1"},
-			expectedOut: "id1",
-		},
-		{
-			name:          "send fail",
-			sendError:     errors.New("failed to send command"),
-			expectedError: "send command failed",
-			instances:     []string{"inst-id-1"},
-		},
-		{
 			name:      "wait single failure",
-			waitError: errors.New("exceeded max attempts"),
-			sendOutput: &ssm.SendCommandOutput{
-				Command: &ssm.Command{CommandId: aws.String("")},
-			},
-			expectedError: "too many failures while awaiting document execution",
-			instances:     []string{"inst-id-1"},
-		},
-		{
-			name:      "wait one succcess",
-			waitError: errors.New("exceeded max attempts"),
-			sendOutput: &ssm.SendCommandOutput{
-				Command: &ssm.Command{CommandId: aws.String("id1")},
-			},
-			instances:   []string{"inst-id-1", "inst-id-2", commandSuccessInstance},
-			expectedOut: "id1",
+			instances: []string{"inst-id-1"},
 		},
 		{
 			name:      "wait fail all",
-			waitError: errors.New("exceeded max attempts"),
-			sendOutput: &ssm.SendCommandOutput{
-				Command: &ssm.Command{CommandId: aws.String("id1")},
-			},
-			expectedError: "too many failures while awaiting document execution",
-			instances:     []string{"inst-id-1", "inst-id-2", "inst-id-3"},
+			instances: []string{"inst-id-1", "inst-id-2", "inst-id-3"},
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			waitError := errors.New("exceeded max attempts")
+			failedInstanceIDs := []string{}
 			mockSSM := MockSSM{
 				SendCommandFn: func(input *ssm.SendCommandInput) (*ssm.SendCommandOutput, error) {
 					assert.Equal(t, "test-doc", aws.StringValue(input.DocumentName))
-					assert.Equal(t, "$DEFAULT", aws.StringValue(input.DocumentVersion))
 					assert.Equal(t, aws.StringSlice(tc.instances), input.InstanceIds)
-					return tc.sendOutput, tc.sendError
+					return &ssm.SendCommandOutput{
+						Command: &ssm.Command{CommandId: aws.String("command-id")},
+					}, nil
 				},
 				WaitUntilCommandExecutedWithContextFn: func(ctx aws.Context, input *ssm.GetCommandInvocationInput, opts ...request.WaiterOption) error {
-					if aws.StringValue(input.InstanceId) == commandSuccessInstance {
-						return nil
-					}
-					return tc.waitError
+					assert.Equal(t, "command-id", aws.StringValue(input.CommandId))
+					return waitError
+				},
+				GetCommandInvocationFn: func(input *ssm.GetCommandInvocationInput) (*ssm.GetCommandInvocationOutput, error) {
+					assert.Equal(t, "command-id", aws.StringValue(input.CommandId))
+					failedInstanceIDs = append(failedInstanceIDs, aws.StringValue(input.InstanceId))
+					return &ssm.GetCommandInvocationOutput{}, nil
 				},
 			}
 			u := updater{ssm: mockSSM}
-			actual, err := u.sendCommand(tc.instances, "test-doc")
-			if tc.expectedOut != "" {
-				require.NoError(t, err)
-				assert.EqualValues(t, tc.expectedOut, actual)
-			} else if tc.sendError != nil {
-				assert.ErrorIs(t, err, tc.sendError)
-				assert.Contains(t, err.Error(), tc.expectedError)
-			} else {
-				assert.ErrorIs(t, err, tc.waitError)
-				assert.Contains(t, err.Error(), tc.expectedError)
-			}
+			commandID, err := u.sendCommand(tc.instances, "test-doc")
+			require.Error(t, err)
+			assert.ErrorIs(t, err, waitError)
+			assert.Equal(t, "", commandID)
+			assert.Equal(t, tc.instances, failedInstanceIDs, "should match instances for which wait fail")
 		})
 	}
+}
+
+func TestSendCommandWaitSuccess(t *testing.T) {
+	mockSendCommand := func(input *ssm.SendCommandInput) (*ssm.SendCommandOutput, error) {
+		assert.Equal(t, "test-doc", aws.StringValue(input.DocumentName))
+		return &ssm.SendCommandOutput{
+			Command: &ssm.Command{CommandId: aws.String("command-id")},
+		}, nil
+	}
+	t.Run("wait one success", func(t *testing.T) {
+		// commandSuccessInstance indicates an instance for which the command should succeed
+		const commandSuccessInstance = "inst-success"
+		instances := []string{"inst-id-1", "inst-id-1", commandSuccessInstance}
+		expectedFailInstances := []string{"inst-id-1", "inst-id-1"}
+		failedInstanceIDs := []string{}
+		mockSSM := MockSSM{
+			SendCommandFn: mockSendCommand,
+			WaitUntilCommandExecutedWithContextFn: func(ctx aws.Context, input *ssm.GetCommandInvocationInput, opts ...request.WaiterOption) error {
+				if aws.StringValue(input.InstanceId) == commandSuccessInstance {
+					return nil
+				}
+				return errors.New("exceeded max attempts")
+			},
+			GetCommandInvocationFn: func(input *ssm.GetCommandInvocationInput) (*ssm.GetCommandInvocationOutput, error) {
+				assert.Equal(t, "command-id", aws.StringValue(input.CommandId))
+				failedInstanceIDs = append(failedInstanceIDs, aws.StringValue(input.InstanceId))
+				return &ssm.GetCommandInvocationOutput{}, nil
+			},
+		}
+		u := updater{ssm: mockSSM}
+		commandID, err := u.sendCommand(instances, "test-doc")
+		require.NoError(t, err)
+		assert.Equal(t, "command-id", commandID)
+		assert.Equal(t, expectedFailInstances, failedInstanceIDs, "should match instances for which wait fail")
+	})
+	t.Run("wait all success", func(t *testing.T) {
+		instances := []string{"inst-id-1", "inst-id-1"}
+		waitInstanceIDs := []string{}
+		mockSSM := MockSSM{
+			SendCommandFn: mockSendCommand,
+			WaitUntilCommandExecutedWithContextFn: func(ctx aws.Context, input *ssm.GetCommandInvocationInput, opts ...request.WaiterOption) error {
+				assert.Equal(t, "command-id", aws.StringValue(input.CommandId))
+				waitInstanceIDs = append(waitInstanceIDs, aws.StringValue(input.InstanceId))
+				return nil
+			},
+		}
+		u := updater{ssm: mockSSM}
+		commandID, err := u.sendCommand(instances, "test-doc")
+		require.NoError(t, err)
+		assert.Equal(t, "command-id", commandID)
+		assert.Equal(t, instances, waitInstanceIDs)
+	})
+
 }
 
 func TestListContainerInstances(t *testing.T) {
@@ -695,6 +749,11 @@ func TestUpdateInstanceErr(t *testing.T) {
 				assert.Equal(t, "instance-id", aws.StringValue(input.InstanceId))
 				return waitExecErr
 			},
+			GetCommandInvocationFn: func(input *ssm.GetCommandInvocationInput) (*ssm.GetCommandInvocationOutput, error) {
+				assert.Equal(t, "command-id", aws.StringValue(input.CommandId))
+				assert.Equal(t, "instance-id", aws.StringValue(input.InstanceId))
+				return &ssm.GetCommandInvocationOutput{}, nil
+			},
 		}
 		u := updater{ssm: mockSSM, checkDocument: "check-document"}
 		err := u.updateInstance(instance{
@@ -841,6 +900,11 @@ func TestVerifyUpdateErr(t *testing.T) {
 				assert.Equal(t, "command-id", aws.StringValue(input.CommandId))
 				assert.Equal(t, "instance-id", aws.StringValue(input.InstanceId))
 				return waitExecErr
+			},
+			GetCommandInvocationFn: func(input *ssm.GetCommandInvocationInput) (*ssm.GetCommandInvocationOutput, error) {
+				assert.Equal(t, "command-id", aws.StringValue(input.CommandId))
+				assert.Equal(t, "instance-id", aws.StringValue(input.InstanceId))
+				return &ssm.GetCommandInvocationOutput{}, nil
 			},
 		}
 		u := updater{ssm: mockSSM, checkDocument: "check-document"}

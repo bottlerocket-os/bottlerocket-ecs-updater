@@ -375,6 +375,7 @@ func (u *updater) sendCommand(instanceIDs []string, ssmDocument string) (string,
 		if err != nil {
 			errCount++
 			log.Printf("Error encountered while awaiting document %q execution for instance: %q: %s", ssmDocument, v, err)
+			u.logCommmandOutput(commandID, v)
 		}
 	}
 	// TODO return a list of instanceIDs which ecnountered no waiter errors.
@@ -394,6 +395,18 @@ func (u *updater) getCommandResult(commandID string, instanceID string) ([]byte,
 	}
 	commandResults := []byte(aws.StringValue(resp.StandardOutputContent))
 	return commandResults, nil
+}
+
+// logCommmandOutput logs the ssm command invocation response
+func (u *updater) logCommmandOutput(commandID string, instanceID string) {
+	resp, err := u.ssm.GetCommandInvocation(&ssm.GetCommandInvocationInput{
+		CommandId:  aws.String(commandID),
+		InstanceId: aws.String(instanceID),
+	})
+	if err != nil {
+		log.Printf("Failed to get invocation output for instance %q: %v", instanceID, err)
+	}
+	log.Printf("Invocation output for instance %q: %#q", instanceID, resp)
 }
 
 // waitUntilOk takes an EC2 ID as a parameter and waits until the specified EC2 instance is in an Ok status.
