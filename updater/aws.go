@@ -133,7 +133,7 @@ func (u *updater) filterAvailableUpdates(bottlerocketInstances []instance) ([]in
 		output, err := parseCommandOutput(commandOutput)
 		if err != nil {
 			// not a fatal error, we can continue checking other instances.
-			log.Printf("Failed to parse command output %s: %v", string(commandOutput), err)
+			log.Printf("Failed to parse command output %q: %v", string(commandOutput), err)
 			continue
 		}
 		if output.UpdateState == updateStateAvailable || output.UpdateState == updateStateReady {
@@ -268,7 +268,7 @@ func (u *updater) updateInstance(inst instance) error {
 	}
 	check, err := parseCommandOutput(output)
 	if err != nil {
-		return fmt.Errorf("failed to parse command output %s: %w", string(output), err)
+		return fmt.Errorf("failed to parse command output %q: %w", string(output), err)
 	}
 
 	switch check.UpdateState {
@@ -331,7 +331,7 @@ func (u *updater) verifyUpdate(inst instance) (bool, error) {
 	}
 	output, err := parseCommandOutput(updateResult)
 	if err != nil {
-		return false, fmt.Errorf("failed to parse command output %s, manual verification required: %w", string(updateResult), err)
+		return false, fmt.Errorf("failed to parse command output %q, manual verification required: %w", string(updateResult), err)
 	}
 	updatedVersion := output.ActivePartition.Image.Version
 	if updatedVersion == inst.bottlerocketVersion {
