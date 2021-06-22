@@ -952,7 +952,7 @@ func TestVerifyUpdateErr(t *testing.T) {
 			bottlerocketVersion: "0.0.0",
 		})
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "failed to parse command output , manual verification required")
+		assert.Contains(t, err.Error(), `failed to parse command output "", manual verification required`)
 		assert.False(t, ok)
 	})
 }
