@@ -20,6 +20,93 @@ When installed, the CloudFormation template will create the following resources 
 * An IAM role for the Bottlerocket ECS Updater task itself as well as roles for Fargate and CloudWatch Events
 * SSM documents to query and execute updates on Bottlerocket instances
 
+## Getting Started
+
+To install the Bottlerocket ECS Updater, you will need to fetch some information first.
+
+### Subnet info
+
+You should either have a default virtual private cloud (VPC) or have already
+[created a VPC](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/get-set-up-for-amazon-ecs.html#create-a-vpc)
+in your account.
+
+To find your default VPC, run this command.
+(If you use an AWS region other than "us-west-2", make sure to change that.)
+
+```sh
+aws ec2 describe-vpcs \
+   --region us-west-2 \
+   --filters=Name=isDefault,Values=true \
+   | jq --raw-output '.Vpcs[].VpcId'
+```
+
+If you want to use a different VPC you created, run this to get the ID for your VPC.
+Make sure to change VPC_NAME to the name of the VPC you created.
+(If you use an EC2 region other than "us-west-2", make sure to change that too.)
+
+```sh
+aws ec2 describe-vpcs \
+   --region us-west-2 \
+   --filters=Name=tag:Name,Values=VPC_NAME \
+   | jq --raw-output '.Vpcs[].VpcId'
+```
+
+Next, run this to get information about the subnets in your VPC.
+It will give you a list of the subnets and tell you whether each is public or private.
+Make sure to change VPC_ID to the value you received from the previous command.
+(If you use an EC2 region other than "us-west-2", make sure to change that too.)
+
+```sh
+aws ec2 describe-subnets \
+   --region us-west-2 \
+   --filter=Name=vpc-id,Values=VPC_ID \
+   | jq '.Subnets[] | {id: .SubnetId, public: .MapPublicIpOnLaunch, az: .AvailabilityZone}'
+```
+
+You'll want to pick at least one and save it for the launch command later.
+Make sure the subnets you select have Internet access so the updater can reach its dependencies.
+Public subnets usually have Internet access via an [Internet gateway](https://docs.aws.amazon.com/vpc/latest/userguide/VPC_Internet_Gateway.html) while private subnets may be configured with NAT.
+For more information, see [the VPC user guide](https://docs.aws.amazon.com/vpc/latest/userguide/VPC_Internet_Gateway.html#vpc-igw-internet-access).
+
+We recommend picking several subnets in different availability zones.
+However, if you want to launch in a specific availability zone, make sure you pick a subnet that matches; the AZ is listed right below the public/private status.
+
+### Log Group
+
+You can either choose an existing log group or create a new one to get your ECS updater logs.
+
+You can run this to get the list of existing log-groups
+```sh
+aws logs describe-log-groups
+```
+
+You'll want to pick one and save it for the installation command later.
+
+If you want to create a new log group, run this (Make sure to provide LOG_GROUP_NAME)
+```sh
+aws logs create-log-group --log-group-name LOG_GROUP_NAME
+```
+
+### Install
+
+Now we can install the [CloudFormation template](stacks/bottlerocket-ecs-updater.yaml) to start the ECS updater for your cluster!
+
+There are a few values to make sure you change in this command:
+* CLUSTER_NAME: the name of the cluster you want ECS updater to manage Bottlerocket instances in
+* SUBNET_IDS: a comma-separated list of the subnets you selected earlier
+* LOG_GROUP_NAME: the log group name you selected or created earlier
+
+```sh
+aws cloudformation deploy \
+    --stack-name "bottlerocket-ecs-updater" \
+    --template-file "./stacks/bottlerocket-ecs-updater.yaml" \
+    --capabilities CAPABILITY_NAMED_IAM \
+    --parameter-overrides \
+    ClusterName="CLUSTER_NAME" \
+    Subnets="SUBNET_IDS" \
+    LogGroupName="LOG_GROUP_NAME"
+```
+
 ## How it works
 
 The Bottlerocket ECS Updater is designed to run as a scheduled Fargate task that queries, drains, and performs updates in your ECS cluster.
