@@ -58,6 +58,7 @@ delete_stack() {
     if ! aws cloudformation delete-stack \
         --stack-name "${stack_name}"; then
         log ERROR "Failed to delete '${stack_name}'"
+        return
     fi
 
     log INFO "Waiting for Cloudformation stack '${stack_name}' to be deleted"
@@ -66,6 +67,7 @@ delete_stack() {
         log ERROR "Failed to wait for ${stack_name} to delete"
         aws cloudformation describe-stack-events \
             --stack-name "${stack_name}"
+        return
     fi
     log INFO "Cloudformation stack '${stack_name}' deleted!"
 }
