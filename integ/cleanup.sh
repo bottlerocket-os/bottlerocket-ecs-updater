@@ -58,6 +58,7 @@ delete_stack() {
     if ! aws cloudformation delete-stack \
         --stack-name "${stack_name}"; then
         log ERROR "Failed to delete '${stack_name}'"
+        return
     fi
 
     log INFO "Waiting for Cloudformation stack '${stack_name}' to be deleted"
@@ -66,8 +67,52 @@ delete_stack() {
         log ERROR "Failed to wait for ${stack_name} to delete"
         aws cloudformation describe-stack-events \
             --stack-name "${stack_name}"
+        return
     fi
     log INFO "Cloudformation stack '${stack_name}' deleted!"
+}
+
+delete_services() {
+    local cluster="${1:?}"
+    log INFO "Deleting services running on cluster '${cluster}'"
+    if ! services=$(aws ecs list-services \
+        --cluster ecs-updater-integ-cluster \
+        --query 'serviceArns[]' \
+        --output text); then
+        log ERROR "Failed to list services in cluster '${cluster}'"
+        return
+    fi
+
+    for service in ${services}; do
+        log INFO "Deleting service '${service}'"
+        if ! aws ecs delete-service \
+            --cluster "${cluster}" \
+            --service "${service}" \
+            --force >/dev/null; then
+            log ERROR "Failed to delete service '${service}'"
+        fi
+    done
+}
+
+stop_tasks() {
+    local cluster="${1:?}"
+    log INFO "Stopping tasks running on cluster '${cluster}'"
+    if ! tasks=$(aws ecs list-tasks \
+        --cluster ecs-updater-integ-cluster \
+        --query 'taskArns[]' \
+        --output text); then
+        log ERROR "Failed to list tasks in cluster '${cluster}'"
+        return
+    fi
+
+    for task in ${tasks}; do
+        log INFO "Stopping task '${task}'"
+        if ! aws ecs stop-task \
+            --cluster "${cluster}" \
+            --task "${task}" >/dev/null; then
+            log ERROR "Failed to stop task '${task}'"
+        fi
+    done
 }
 
 terminate_instances() {
@@ -120,6 +165,10 @@ parse_args "${@}"
 delete_stack "${UPDATER_STACK_PREFIX}${CLUSTER}"
 
 terminate_instances "${CLUSTER}"
+
+delete_services "${CLUSTER}"
+
+stop_tasks "${CLUSTER}"
 
 delete_stack "${CLUSTER}"
 
