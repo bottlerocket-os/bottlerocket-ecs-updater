@@ -956,3 +956,59 @@ func TestVerifyUpdateErr(t *testing.T) {
 		assert.False(t, ok)
 	})
 }
+
+func TestActivateInstance(t *testing.T) {
+	cases := []struct {
+		name        string
+		stateOut    *ecs.UpdateContainerInstancesStateOutput
+		stateErr    error
+		expectedErr string
+	}{
+		{
+			name:     "activate success",
+			stateOut: &ecs.UpdateContainerInstancesStateOutput{},
+		}, {
+			name: "activate api fail",
+			stateOut: &ecs.UpdateContainerInstancesStateOutput{
+				Failures: []*ecs.Failure{
+					{
+						Reason: aws.String("OTHER"),
+					},
+				},
+			},
+			expectedErr: "API failures while activating: [{\n  Reason: \"OTHER\"\n}]",
+		},
+		{
+			name: "activate api fail inactive",
+			stateOut: &ecs.UpdateContainerInstancesStateOutput{
+				Failures: []*ecs.Failure{
+					{
+						Reason: aws.String("INACTIVE"),
+					},
+				},
+			},
+		},
+		{
+			name:        "activate failure",
+			stateErr:    errors.New("failed to activate"),
+			expectedErr: "failed to activate",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mockECS := MockECS{
+				UpdateContainerInstancesStateFn: func(input *ecs.UpdateContainerInstancesStateInput) (*ecs.UpdateContainerInstancesStateOutput, error) {
+					return tc.stateOut, tc.stateErr
+				},
+			}
+			u := updater{ecs: mockECS}
+			err := u.activateInstance("cont-inst-id")
+			if tc.expectedErr == "" {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.expectedErr)
+			}
+		})
+	}
+}

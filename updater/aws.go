@@ -221,6 +221,10 @@ func (u *updater) activateInstance(containerInstance string) error {
 		return fmt.Errorf("failed to change state to ACTIVE: %w", err)
 	}
 	if len(resp.Failures) != 0 {
+		if aws.StringValue(resp.Failures[0].Reason) == "INACTIVE" {
+			log.Printf("Container instance %q is in INACTIVE state", containerInstance)
+			return nil
+		}
 		return fmt.Errorf("API failures while activating: %v", resp.Failures)
 	}
 	log.Printf("Container instance %q state changed to ACTIVE successfully!", containerInstance)
