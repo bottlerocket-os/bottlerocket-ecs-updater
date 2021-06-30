@@ -31,6 +31,17 @@ Resources:
                 - 'ecs-tasks.amazonaws.com'
             Action:
               - 'sts:AssumeRole'
+      Policies:
+        - PolicyName: CreateLogGroupPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # Allows creating log group if it does not exist
+              - Effect: Allow
+                Action:
+                  - 'logs:CreateLogGroup'
+                Resource:
+                  - 'arn:aws:logs:*:*:*'
       Path: !Sub /${AWS::StackName}/
       ManagedPolicyArns:
         - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy'
@@ -119,6 +130,7 @@ Resources:
           LogConfiguration:
             LogDriver: awslogs
             Options:
+              awslogs-create-group: 'true'
               awslogs-region: !Ref AWS::Region
               awslogs-group: !Ref LogGroupName
               awslogs-stream-prefix: !Sub '/ecs/bottlerocket-updater/${ClusterName}'
