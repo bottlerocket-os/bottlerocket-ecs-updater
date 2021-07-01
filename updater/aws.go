@@ -60,6 +60,22 @@ type EC2API interface {
 	WaitUntilInstanceStatusOk(input *ec2.DescribeInstanceStatusInput) error
 }
 
+func (u *updater) alreadyRunning(family string) (bool, error) {
+	log.Print("Checking for running updater tasks")
+	list, err := u.ecs.ListTasks(&ecs.ListTasksInput{
+		Cluster: &u.cluster,
+		Family:  aws.String(family),
+	})
+	if err != nil {
+		return false, fmt.Errorf("failed to list running updater tasks: %w", err)
+	}
+	if len(list.TaskArns) > 1 {
+		return true, nil
+	}
+	log.Println("This is the only running updater.")
+	return false, nil
+}
+
 func (u *updater) listContainerInstances() ([]*string, error) {
 	log.Printf("Listing active container instances in cluster %q", u.cluster)
 	resp, err := u.ecs.ListContainerInstances(&ecs.ListContainerInstancesInput{
