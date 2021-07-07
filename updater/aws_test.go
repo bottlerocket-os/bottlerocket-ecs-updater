@@ -15,6 +15,61 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestGetCommandResult(t *testing.T) {
+	cases := []struct {
+		name            string
+		invocationOut   *ssm.GetCommandInvocationOutput
+		expectedError   string
+		expectedOut     []byte
+		invocationError error
+	}{
+		{
+			name: "getCommand success",
+			invocationOut: &ssm.GetCommandInvocationOutput{
+				Status:                aws.String("Success"),
+				StandardOutputContent: aws.String("OutputContent"),
+			},
+			expectedOut: []byte(aws.StringValue(aws.String("OutputContent"))),
+		},
+		{
+			name:            "getCommand fail",
+			invocationError: errors.New("failed to get command invocation"),
+			expectedError:   "failed to retrieve command invocation output: failed to get command invocation",
+			invocationOut:   nil,
+			expectedOut:     nil,
+		},
+		{
+			name: "command status non-Success",
+			invocationOut: &ssm.GetCommandInvocationOutput{
+				Status:                aws.String("TimedOut"),
+				StandardOutputContent: nil,
+			},
+			expectedError: "command command-id has not reached success status, current status \"TimedOut\"",
+			expectedOut:   nil,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mockSSM := MockSSM{
+				GetCommandInvocationFn: func(input *ssm.GetCommandInvocationInput) (*ssm.GetCommandInvocationOutput, error) {
+					assert.Equal(t, "command-id", aws.StringValue(input.CommandId))
+					assert.Equal(t, "instance-id", aws.StringValue(input.InstanceId))
+					return tc.invocationOut, tc.invocationError
+				},
+			}
+			u := updater{ssm: mockSSM}
+			actual, err := u.getCommandResult("command-id", "instance-id")
+			if tc.expectedOut != nil {
+				require.NoError(t, err)
+				assert.EqualValues(t, tc.expectedOut, actual)
+			} else {
+				require.Error(t, err)
+				assert.EqualError(t, err, tc.expectedError)
+			}
+		})
+	}
+}
+
 func TestSendCommandSuccess(t *testing.T) {
 	instances := []string{"inst-id-1", "inst-id-2"}
 	waitInstanceIDs := []string{}
@@ -774,24 +829,28 @@ func TestUpdateInstance(t *testing.T) {
 		{
 			name: "update state available",
 			invocationOut: &ssm.GetCommandInvocationOutput{
+				Status:                aws.String("Success"),
 				StandardOutputContent: aws.String(fmt.Sprintf(checkPattern, updateStateAvailable)),
 			},
 			expectedSSMCommandCallOrder: []string{"check-document", "apply-document", "reboot-document"},
 		}, {
 			name: "update state ready",
 			invocationOut: &ssm.GetCommandInvocationOutput{
+				Status:                aws.String("Success"),
 				StandardOutputContent: aws.String(fmt.Sprintf(checkPattern, updateStateReady)),
 			},
 			expectedSSMCommandCallOrder: []string{"check-document", "reboot-document"},
 		}, {
 			name: "update state idle",
 			invocationOut: &ssm.GetCommandInvocationOutput{
+				Status:                aws.String("Success"),
 				StandardOutputContent: aws.String(fmt.Sprintf(checkPattern, updateStateIdle)),
 			},
 			expectedSSMCommandCallOrder: []string{"check-document"},
 		}, {
 			name: "update state staged",
 			invocationOut: &ssm.GetCommandInvocationOutput{
+				Status:                aws.String("Success"),
 				StandardOutputContent: aws.String(fmt.Sprintf(checkPattern, updateStateStaged)),
 			},
 			expectedSSMCommandCallOrder: []string{"check-document"},
@@ -859,6 +918,7 @@ func TestUpdateInstanceErr(t *testing.T) {
 		assert.Equal(t, "command-id", aws.StringValue(input.CommandId))
 		assert.Equal(t, "instance-id", aws.StringValue(input.InstanceId))
 		return &ssm.GetCommandInvocationOutput{
+			Status:                aws.String("Success"),
 			StandardOutputContent: aws.String("{\"update_state\": \"Available\", \"active_partition\": { \"image\": { \"version\": \"0.0.0\"}}}"),
 		}, nil
 	}
@@ -1003,6 +1063,7 @@ func TestVerifyUpdate(t *testing.T) {
 		{
 			name: "verify success",
 			invocationOut: &ssm.GetCommandInvocationOutput{
+				Status:                aws.String("Success"),
 				StandardOutputContent: aws.String(fmt.Sprintf(checkPattern, updateStateIdle, "0.0.1")),
 			},
 			expectedOk: true,
@@ -1010,6 +1071,7 @@ func TestVerifyUpdate(t *testing.T) {
 		{
 			name: "version is same",
 			invocationOut: &ssm.GetCommandInvocationOutput{
+				Status:                aws.String("Success"),
 				StandardOutputContent: aws.String(fmt.Sprintf(checkPattern, updateStateIdle, "0.0.0")),
 			},
 			expectedOk: false,
@@ -1017,6 +1079,7 @@ func TestVerifyUpdate(t *testing.T) {
 		{
 			name: "another version is available",
 			invocationOut: &ssm.GetCommandInvocationOutput{
+				Status:                aws.String("Success"),
 				StandardOutputContent: aws.String(fmt.Sprintf(checkPattern, updateStateAvailable, "0.0.1")),
 			},
 			expectedOk: true,
@@ -1076,7 +1139,9 @@ func TestVerifyUpdateErr(t *testing.T) {
 	mockGetCommandInvocation := func(input *ssm.GetCommandInvocationInput) (*ssm.GetCommandInvocationOutput, error) {
 		assert.Equal(t, "command-id", aws.StringValue(input.CommandId))
 		assert.Equal(t, "instance-id", aws.StringValue(input.InstanceId))
-		return &ssm.GetCommandInvocationOutput{}, nil
+		return &ssm.GetCommandInvocationOutput{
+			Status: aws.String("Success"),
+		}, nil
 	}
 	t.Run("check err", func(t *testing.T) {
 		ssmCheckErr := errors.New("failed to send check command")
