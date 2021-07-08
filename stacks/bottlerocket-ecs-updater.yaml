@@ -145,6 +145,21 @@ Resources:
         - Id: ecs-updater-fargate-task
           RoleArn: !GetAtt CronRole.Arn
           Arn: !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:cluster/${ClusterName}'
+          Input:
+             !Sub |
+              {
+                  "containerOverrides": [
+                      {
+                         "name": "BottlerocketEcsUpdaterService",
+                         "environment": [
+                             {
+                                 "name" : "TASK_DEFINITION_ARN",
+                                 "value": "${UpdaterTaskDefinition}"
+                             }
+                         ]
+                      }
+                  ]
+              }
           EcsParameters:
             LaunchType: FARGATE
             TaskCount: 1

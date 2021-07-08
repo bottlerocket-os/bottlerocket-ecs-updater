@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/arn"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/ec2"
 	"github.com/aws/aws-sdk-go/service/ecs"
@@ -22,6 +24,8 @@ var (
 	flagApply   = flag.String("apply-document", "", "The SSM document name for applying updates.")
 	flagReboot  = flag.String("reboot-document", "", "The SSM document name to initiate a reboot.")
 )
+
+const taskDefARNEnv = "TASK_DEFINITION_ARN"
 
 type updater struct {
 	cluster        string
@@ -72,6 +76,21 @@ func _main() error {
 		ecs:            ecs.New(sess, aws.NewConfig()),
 		ssm:            ssm.New(sess, aws.NewConfig()),
 		ec2:            ec2.New(sess, aws.NewConfig()),
+	}
+
+	family, err := taskDefFamily()
+	if err != nil {
+		log.Printf("Failed to parse updater task definition arn: %v", err)
+		log.Printf("Ignoring check for already running updater")
+	} else {
+		ok, err := u.alreadyRunning(family)
+		if err != nil {
+			return fmt.Errorf("Cannot determine running updater tasks, therefore stopping this run to avoid risk of multiple runs: %w", err)
+		}
+		if ok {
+			log.Printf("Another updater is running, therefore exiting this run.")
+			return nil
+		}
 	}
 
 	listedInstances, err := u.listContainerInstances()
@@ -147,4 +166,21 @@ func _main() error {
 		}
 	}
 	return nil
+}
+
+func taskDefFamily() (string, error) {
+	taskDefInput := os.Getenv(taskDefARNEnv)
+	taskDefARN, err := arn.Parse(taskDefInput)
+	if err != nil {
+		return "", err
+	}
+	const taskDefPrefix = "task-definition/"
+	if !strings.Contains(taskDefARN.Resource, taskDefPrefix) {
+		return "", fmt.Errorf("not a task definition arn: %q", taskDefInput)
+	}
+	// extract task definition family from resource: task-definition/<task definition family>:<revision>
+	taskDef := strings.TrimPrefix(taskDefARN.Resource, taskDefPrefix)
+	family := strings.SplitN(taskDef, ":", 2)[0]
+	log.Printf("Updater task definition family: %q", family)
+	return family, nil
 }

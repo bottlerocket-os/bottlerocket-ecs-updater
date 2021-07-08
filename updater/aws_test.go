@@ -1012,3 +1012,57 @@ func TestActivateInstance(t *testing.T) {
 		})
 	}
 }
+
+func TestAlreadyRunning(t *testing.T) {
+	cases := []struct {
+		name        string
+		listOut     *ecs.ListTasksOutput
+		listErr     error
+		expectedOk  bool
+		expectedErr string
+	}{
+		{
+			name: "success",
+			listOut: &ecs.ListTasksOutput{
+				TaskArns: []*string{
+					aws.String("task-arn-1"),
+					aws.String("task-arn-2"),
+				},
+			},
+			expectedOk: true,
+		},
+		{
+			name: "only one task",
+			listOut: &ecs.ListTasksOutput{
+				TaskArns: []*string{
+					aws.String("tarsk-arn-1"),
+				},
+			},
+			expectedOk: false,
+		},
+		{
+			name:        "fail list task",
+			listErr:     errors.New("failed to list task"),
+			expectedOk:  false,
+			expectedErr: "failed to list task",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mockECS := MockECS{
+				ListTasksFn: func(input *ecs.ListTasksInput) (*ecs.ListTasksOutput, error) {
+					return tc.listOut, tc.listErr
+				},
+			}
+			u := updater{ecs: mockECS, cluster: "ecs-cluster"}
+			ok, err := u.alreadyRunning("updater-family")
+			if tc.expectedErr == "" {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.expectedErr)
+			}
+			assert.Equal(t, tc.expectedOk, ok)
+		})
+	}
+}
