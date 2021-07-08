@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"strconv"
 	"testing"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -159,6 +160,7 @@ func TestListContainerInstances(t *testing.T) {
 	cases := []struct {
 		name          string
 		listOutput    *ecs.ListContainerInstancesOutput
+		listOutput2   *ecs.ListContainerInstancesOutput
 		listError     error
 		expectedError string
 		expectedOut   []*string
@@ -170,23 +172,42 @@ func TestListContainerInstances(t *testing.T) {
 					aws.String("cont-inst-arn1"),
 					aws.String("cont-inst-arn2"),
 					aws.String("cont-inst-arn3")},
+				NextToken: aws.String("token"),
+			},
+			listOutput2: &ecs.ListContainerInstancesOutput{
+				ContainerInstanceArns: []*string{
+					aws.String("cont-inst-arn4"),
+					aws.String("cont-inst-arn5"),
+					aws.String("cont-inst-arn6")},
+				NextToken: nil,
 			},
 			expectedOut: []*string{
 				aws.String("cont-inst-arn1"),
 				aws.String("cont-inst-arn2"),
 				aws.String("cont-inst-arn3"),
-			},
+				aws.String("cont-inst-arn4"),
+				aws.String("cont-inst-arn5"),
+				aws.String("cont-inst-arn6")},
 		},
 		{
 			name: "without instances",
 			listOutput: &ecs.ListContainerInstancesOutput{
 				ContainerInstanceArns: []*string{},
 			},
+			listOutput2: &ecs.ListContainerInstancesOutput{
+				ContainerInstanceArns: []*string{},
+			},
 			expectedOut: []*string{},
 		},
 		{
-			name:          "list fail",
-			listError:     errors.New("failed to list instances"),
+			name:      "list fail",
+			listError: errors.New("failed to list instances"),
+			listOutput: &ecs.ListContainerInstancesOutput{
+				ContainerInstanceArns: []*string{},
+			},
+			listOutput2: &ecs.ListContainerInstancesOutput{
+				ContainerInstanceArns: []*string{},
+			},
 			expectedError: "failed to list container instances",
 		},
 	}
@@ -194,10 +215,11 @@ func TestListContainerInstances(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			mockECS := MockECS{
-				ListContainerInstancesFn: func(input *ecs.ListContainerInstancesInput) (*ecs.ListContainerInstancesOutput, error) {
-					assert.Equal(t, int64(pageSize), aws.Int64Value(input.MaxResults))
-					assert.Equal(t, "ACTIVE", aws.StringValue(input.Status))
-					return tc.listOutput, tc.listError
+				ListContainerInstancesPagesFn: func(input *ecs.ListContainerInstancesInput, fn func(*ecs.ListContainerInstancesOutput, bool) bool) error {
+					assert.Equal(t, ecs.ContainerInstanceStatusActive, aws.StringValue(input.Status))
+					fn(tc.listOutput, true)
+					fn(tc.listOutput2, false)
+					return tc.listError
 				},
 			}
 			u := updater{ecs: mockECS}
@@ -268,6 +290,190 @@ func TestFilterBottlerocketInstances(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.EqualValues(t, expected, actual)
+}
+
+func TestPaginatedFilterBottlerocketInstancesAllFail(t *testing.T) {
+	instances := make([]*string, 0)
+	for i := 0; i < 150; i++ {
+		ec2ID := "ec2-id-br" + strconv.Itoa(i)
+		instances = append(instances, aws.String(ec2ID))
+	}
+
+	responses := []struct {
+		inputLen           int
+		ContainerInstances []*ecs.ContainerInstance
+		err                error
+	}{{
+		100,
+		nil,
+		errors.New("Failed to describe container instances"),
+	}, {
+		50,
+		nil,
+		errors.New("Failed to describe container instances"),
+	}}
+
+	callCount := 0
+	mockECS := MockECS{
+		DescribeContainerInstancesFn: func(input *ecs.DescribeContainerInstancesInput) (*ecs.DescribeContainerInstancesOutput, error) {
+			require.Less(t, callCount, len(responses))
+			resp := responses[callCount]
+			callCount++
+			assert.Equal(t, resp.inputLen, len(input.ContainerInstances))
+			return &ecs.DescribeContainerInstancesOutput{ContainerInstances: resp.ContainerInstances}, resp.err
+		},
+	}
+
+	u := updater{ecs: mockECS}
+	actual, err := u.filterBottlerocketInstances(instances)
+	require.Error(t, err)
+	assert.Empty(t, actual)
+	assert.Contains(t, err.Error(), "Failed to describe container instances")
+}
+
+func TestPaginatedFilterBottlerocketInstancesSingleFailure(t *testing.T) {
+	descOut := make([]*ecs.ContainerInstance, 0)
+	instances := make([]*string, 0)
+	expected := make([]instance, 0)
+	for i := 0; i < 150; i++ {
+		instanceARN := "cont-inst-br" + strconv.Itoa(i)
+		ec2ID := "ec2-id-br" + strconv.Itoa(i)
+		instances = append(instances, aws.String(ec2ID))
+		descOut = append(descOut, &ecs.ContainerInstance{
+			Attributes:           []*ecs.Attribute{{Name: aws.String("bottlerocket.variant")}},
+			ContainerInstanceArn: aws.String(instanceARN),
+			Ec2InstanceId:        aws.String(ec2ID),
+		})
+		expected = append(expected, instance{
+			instanceID:          ec2ID,
+			containerInstanceID: instanceARN,
+		})
+	}
+
+	responses := []struct {
+		inputLen           int
+		ContainerInstances []*ecs.ContainerInstance
+		err                error
+	}{{
+		100,
+		nil,
+		errors.New("Failed to describe container instances"),
+	}, {
+		50,
+		descOut[100:],
+		nil,
+	}}
+
+	callCount := 0
+	mockECS := MockECS{
+		DescribeContainerInstancesFn: func(input *ecs.DescribeContainerInstancesInput) (*ecs.DescribeContainerInstancesOutput, error) {
+			require.Less(t, callCount, len(responses))
+			resp := responses[callCount]
+			callCount++
+			assert.Equal(t, resp.inputLen, len(input.ContainerInstances))
+			return &ecs.DescribeContainerInstancesOutput{ContainerInstances: resp.ContainerInstances}, resp.err
+		},
+	}
+
+	u := updater{ecs: mockECS}
+	actual, err := u.filterBottlerocketInstances(instances)
+	require.NoError(t, err)
+	assert.EqualValues(t, expected[100:], actual, "should contain only the last 50 instnaces")
+}
+
+func TestPaginatedFilterBottlerocketInstancesNoBR(t *testing.T) {
+	descOut := make([]*ecs.ContainerInstance, 0)
+	instances := make([]*string, 0)
+	for i := 0; i < 150; i++ {
+		instanceARN := "cont-inst-br" + strconv.Itoa(i)
+		ec2ID := "ec2-id-br" + strconv.Itoa(i)
+		instances = append(instances, aws.String(ec2ID))
+		descOut = append(descOut, &ecs.ContainerInstance{
+			Attributes:           []*ecs.Attribute{{Name: aws.String("nottlerocket.variant")}},
+			ContainerInstanceArn: aws.String(instanceARN),
+			Ec2InstanceId:        aws.String(ec2ID),
+		})
+	}
+
+	responses := []struct {
+		inputLen           int
+		ContainerInstances []*ecs.ContainerInstance
+		err                error
+	}{{
+		100,
+		descOut[:100],
+		nil,
+	}, {
+		50,
+		descOut[100:],
+		nil,
+	}}
+
+	callCount := 0
+	mockECS := MockECS{
+		DescribeContainerInstancesFn: func(input *ecs.DescribeContainerInstancesInput) (*ecs.DescribeContainerInstancesOutput, error) {
+			require.Less(t, callCount, len(responses))
+			resp := responses[callCount]
+			callCount++
+			assert.Equal(t, resp.inputLen, len(input.ContainerInstances))
+			return &ecs.DescribeContainerInstancesOutput{ContainerInstances: resp.ContainerInstances}, resp.err
+		},
+	}
+
+	u := updater{ecs: mockECS}
+	actual, err := u.filterBottlerocketInstances(instances)
+	require.NoError(t, err)
+	assert.Empty(t, actual)
+}
+
+func TestPaginatedFilterBottlerocketInstancesAllBRInstances(t *testing.T) {
+	descOut := make([]*ecs.ContainerInstance, 0)
+	instances := make([]*string, 0)
+	expected := make([]instance, 0)
+	for i := 0; i < 150; i++ {
+		instanceARN := "cont-inst-br" + strconv.Itoa(i)
+		ec2ID := "ec2-id-br" + strconv.Itoa(i)
+		instances = append(instances, aws.String(ec2ID))
+		descOut = append(descOut, &ecs.ContainerInstance{
+			Attributes:           []*ecs.Attribute{{Name: aws.String("bottlerocket.variant")}},
+			ContainerInstanceArn: aws.String(instanceARN),
+			Ec2InstanceId:        aws.String(ec2ID),
+		})
+		expected = append(expected, instance{
+			instanceID:          ec2ID,
+			containerInstanceID: instanceARN,
+		})
+	}
+
+	responses := []struct {
+		inputLen           int
+		ContainerInstances []*ecs.ContainerInstance
+		err                error
+	}{{
+		100,
+		descOut[:100],
+		nil,
+	}, {
+		50,
+		descOut[100:],
+		nil,
+	}}
+
+	callCount := 0
+	mockECS := MockECS{
+		DescribeContainerInstancesFn: func(input *ecs.DescribeContainerInstancesInput) (*ecs.DescribeContainerInstancesOutput, error) {
+			require.Less(t, callCount, len(responses))
+			resp := responses[callCount]
+			callCount++
+			assert.Equal(t, resp.inputLen, len(input.ContainerInstances))
+			return &ecs.DescribeContainerInstancesOutput{ContainerInstances: resp.ContainerInstances}, resp.err
+		},
+	}
+
+	u := updater{ecs: mockECS}
+	actual, err := u.filterBottlerocketInstances(instances)
+	require.NoError(t, err)
+	assert.EqualValues(t, expected, actual, "should contain all the instances")
 }
 
 func TestEligible(t *testing.T) {
