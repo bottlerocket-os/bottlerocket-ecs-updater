@@ -463,6 +463,9 @@ func (u *updater) getCommandResult(commandID string, instanceID string) ([]byte,
 		return nil, fmt.Errorf("failed to retrieve command invocation output: %w", err)
 	}
 	commandResults := []byte(aws.StringValue(resp.StandardOutputContent))
+	if aws.StringValue(resp.Status) != ssm.CommandInvocationStatusSuccess {
+		return nil, fmt.Errorf("command %s has not reached success status, current status %q", commandID, aws.StringValue(resp.Status))
+	}
 	return commandResults, nil
 }
 
