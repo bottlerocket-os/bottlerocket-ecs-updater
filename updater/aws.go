@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -432,24 +433,36 @@ func (u *updater) sendCommand(instanceIDs []string, ssmDocument string) (string,
 	log.Printf("SSM document %q posted with command id %q", ssmDocument, commandID)
 
 	// Wait for the sent commands to complete.
-	errCount := 0
+	wg := sync.WaitGroup{}
+	instanceCount := len(instanceIDs)
+	errChan := make(chan error, instanceCount)
 	for _, v := range instanceIDs {
 		log.Printf("Waiting for command %q to complete for instance %q", commandID, v)
-		err = u.ssm.WaitUntilCommandExecutedWithContext(aws.BackgroundContext(), &ssm.GetCommandInvocationInput{
-			CommandId:  &commandID,
-			InstanceId: &v,
-		},
-			request.WithWaiterMaxAttempts(waiterMaxAttempts),
-			request.WithWaiterDelay(request.ConstantWaiterDelay(waiterDelay)))
-		if err != nil {
-			errCount++
-			log.Printf("Error encountered while awaiting document %q execution for instance: %q: %s", ssmDocument, v, err)
-			u.logCommmandOutput(commandID, v)
-		}
+		wg.Add(1)
+		go func(instanceID string) {
+			defer wg.Done()
+			err = u.ssm.WaitUntilCommandExecutedWithContext(aws.BackgroundContext(), &ssm.GetCommandInvocationInput{
+				CommandId:  aws.String(commandID),
+				InstanceId: aws.String(instanceID),
+			},
+				request.WithWaiterMaxAttempts(waiterMaxAttempts),
+				request.WithWaiterDelay(request.ConstantWaiterDelay(waiterDelay)))
+			if err != nil {
+				errChan <- err
+				log.Printf("Error encountered while awaiting document %q execution for instance: %q: %s", ssmDocument, instanceID, err)
+				u.logCommmandOutput(commandID, instanceID)
+			}
+		}(aws.StringValue(&v))
 	}
-	// TODO return a list of instanceIDs which ecnountered no waiter errors.
-	if errCount == len(instanceIDs) {
-		return "", fmt.Errorf("too many failures while awaiting document execution: %w", err)
+	wg.Wait()
+	close(errChan)
+
+	errCount := 0
+	for err = range errChan {
+		errCount++
+		if errCount == instanceCount {
+			return "", fmt.Errorf("too many failures while awaiting document execution: %w", err)
+		}
 	}
 	return commandID, nil
 }

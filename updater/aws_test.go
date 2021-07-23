@@ -90,7 +90,7 @@ func TestSendCommandSuccess(t *testing.T) {
 	commandID, err := u.sendCommand(instances, "test-doc")
 	require.NoError(t, err)
 	assert.EqualValues(t, "command-id", commandID)
-	assert.Equal(t, instances, waitInstanceIDs)
+	assert.ElementsMatch(t, instances, waitInstanceIDs)
 }
 
 func TestSendCommandErr(t *testing.T) {
@@ -153,7 +153,7 @@ func TestSendCommandWaitErr(t *testing.T) {
 			require.Error(t, err)
 			assert.ErrorIs(t, err, waitError)
 			assert.Equal(t, "", commandID)
-			assert.Equal(t, tc.instances, failedInstanceIDs, "should match instances for which wait fail")
+			assert.ElementsMatch(t, tc.instances, failedInstanceIDs, "should match instances for which wait fails")
 		})
 	}
 }
@@ -168,8 +168,8 @@ func TestSendCommandWaitSuccess(t *testing.T) {
 	t.Run("wait one success", func(t *testing.T) {
 		// commandSuccessInstance indicates an instance for which the command should succeed
 		const commandSuccessInstance = "inst-success"
-		instances := []string{"inst-id-1", "inst-id-1", commandSuccessInstance}
-		expectedFailInstances := []string{"inst-id-1", "inst-id-1"}
+		instances := []string{"inst-id-1", "inst-id-2", commandSuccessInstance}
+		expectedFailInstances := []string{"inst-id-1", "inst-id-2"}
 		failedInstanceIDs := []string{}
 		mockSSM := MockSSM{
 			SendCommandFn: mockSendCommand,
@@ -189,10 +189,10 @@ func TestSendCommandWaitSuccess(t *testing.T) {
 		commandID, err := u.sendCommand(instances, "test-doc")
 		require.NoError(t, err)
 		assert.Equal(t, "command-id", commandID)
-		assert.Equal(t, expectedFailInstances, failedInstanceIDs, "should match instances for which wait fail")
+		assert.ElementsMatch(t, expectedFailInstances, failedInstanceIDs, "should match instances for which wait fails")
 	})
 	t.Run("wait all success", func(t *testing.T) {
-		instances := []string{"inst-id-1", "inst-id-1"}
+		instances := []string{"inst-id-1", "inst-id-2"}
 		waitInstanceIDs := []string{}
 		mockSSM := MockSSM{
 			SendCommandFn: mockSendCommand,
@@ -206,7 +206,7 @@ func TestSendCommandWaitSuccess(t *testing.T) {
 		commandID, err := u.sendCommand(instances, "test-doc")
 		require.NoError(t, err)
 		assert.Equal(t, "command-id", commandID)
-		assert.Equal(t, instances, waitInstanceIDs)
+		assert.ElementsMatch(t, instances, waitInstanceIDs, "should match instances for which wait succeeds")
 	})
 
 }
