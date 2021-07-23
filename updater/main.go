@@ -121,14 +121,17 @@ func _main() error {
 	}
 	log.Printf("Instances ready for update: %#q", candidates)
 
+	summary := make(map[string]string)
 	for _, i := range candidates {
 		eligible, err := u.eligible(i.containerInstanceID)
 		if err != nil {
 			log.Printf("Failed to determine eligibility for update of instance %#q: %v", i, err)
+			summary[i.instanceID] = fmt.Sprintf("Failed to determine eligibility for update: %v", err)
 			continue
 		}
 		if !eligible {
 			log.Printf("Instance %#q is not eligible for updates because it contains non-service task", i)
+			summary[i.instanceID] = "Instance is not eligible for updates because it contains non-service task(s)"
 			continue
 		}
 		log.Printf("Instance %q is eligible for update", i)
@@ -136,6 +139,7 @@ func _main() error {
 		err = u.drainInstance(i.containerInstanceID)
 		if err != nil {
 			log.Printf("Failed to drain instance %#q: %v", i, err)
+			summary[i.instanceID] = fmt.Sprintf("Failed to drain: %v", err)
 			continue
 		}
 		log.Printf("Instance %#q successfully drained!", i)
@@ -147,6 +151,7 @@ func _main() error {
 			return fmt.Errorf("instance %#q failed to re-activate after failing to update: %w", i, activateErr)
 		} else if updateErr != nil {
 			log.Printf("Failed to update instance %#q: %v", i, updateErr)
+			summary[i.instanceID] = fmt.Sprintf("Failed to update: %v", updateErr)
 			continue
 		} else if activateErr != nil {
 			return fmt.Errorf("instance %#q failed to re-activate after update: %w", i, activateErr)
@@ -161,10 +166,17 @@ func _main() error {
 		}
 		if !ok {
 			log.Printf("Update failed for instance %#q", i)
+			summary[i.instanceID] = "Update failed"
 		} else {
 			log.Printf("Instance %#q updated successfully!", i)
+			summary[i.instanceID] = "Instance updated successfully"
 		}
 	}
+	log.Printf("After action summary:")
+	for k, v := range summary {
+		log.Printf("%s: %s", k, v)
+	}
+	log.Printf("Update operations complete!")
 	return nil
 }
 
