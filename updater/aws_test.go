@@ -15,6 +15,292 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestFilterAvailableUpdates(t *testing.T) {
+	instances := []instance{
+		{
+			instanceID:          "inst-id-1",
+			containerInstanceID: "cont-inst-1",
+		},
+		{
+			instanceID:          "inst-id-2",
+			containerInstanceID: "cont-inst-2",
+		},
+		{
+			instanceID:          "inst-id-3",
+			containerInstanceID: "cont-inst-3",
+		},
+		{
+			instanceID:          "inst-id-4",
+			containerInstanceID: "cont-inst-4",
+		},
+		{
+			instanceID:          "inst-id-5",
+			containerInstanceID: "cont-inst-5",
+		},
+	}
+	expected := []instance{
+		{
+			instanceID:          "inst-id-1",
+			containerInstanceID: "cont-inst-1",
+			bottlerocketVersion: "v1.0.5",
+		},
+		{
+			instanceID:          "inst-id-2",
+			containerInstanceID: "cont-inst-2",
+			bottlerocketVersion: "v1.0.5",
+		},
+		{
+			instanceID:          "inst-id-5",
+			containerInstanceID: "cont-inst-5",
+			bottlerocketVersion: "v1.0.5",
+		},
+	}
+	responses := map[string]string{
+		"inst-id-1": `{"update_state": "Available", "active_partition": { "image": { "version": "v1.0.5"}}}`,
+		"inst-id-2": `{"update_state": "Ready", "active_partition": { "image": { "version": "v1.0.5"}}}`,
+		"inst-id-3": `{"update_state": "Idle", "active_partition": { "image": { "version": "v1.1.1"}}}`,
+		"inst-id-4": `{"update_state": "Staged", "active_partition": { "image": { "version": "v1.1.1"}}}`,
+		"inst-id-5": `{"update_state": "Available", "active_partition": { "image": { "version": "v1.0.5"}}}`,
+	}
+	sendCommandCalls := 0
+	commandWaiterCalls := 0
+	getCommandInvocationCalls := 0
+	mockSSM := MockSSM{
+		GetCommandInvocationFn: func(input *ssm.GetCommandInvocationInput) (*ssm.GetCommandInvocationOutput, error) {
+			getCommandInvocationCalls++
+			return &ssm.GetCommandInvocationOutput{
+				Status:                aws.String("Success"),
+				StandardOutputContent: aws.String(responses[*input.InstanceId]),
+			}, nil
+		},
+		SendCommandFn: func(input *ssm.SendCommandInput) (*ssm.SendCommandOutput, error) {
+			sendCommandCalls++
+			return &ssm.SendCommandOutput{
+				Command: &ssm.Command{
+					CommandId:    aws.String("command-id"),
+					DocumentName: aws.String("check-document"),
+				},
+			}, nil
+		},
+		WaitUntilCommandExecutedWithContextFn: func(ctx aws.Context, input *ssm.GetCommandInvocationInput, opts ...request.WaiterOption) error {
+			commandWaiterCalls++
+			assert.Equal(t, "command-id", aws.StringValue(input.CommandId))
+			return nil
+		},
+	}
+	u := updater{ssm: mockSSM, checkDocument: "check-document"}
+	actual, err := u.filterAvailableUpdates(instances)
+	require.NoError(t, err)
+	assert.Equal(t, expected, actual, "Should only contain instances in Aavailable or Ready update state")
+	assert.Equal(t, 1, sendCommandCalls, "should send commands for each page")
+	assert.Equal(t, 5, commandWaiterCalls, "should wait for each instance")
+	assert.Equal(t, 5, getCommandInvocationCalls, "should collect output for each instance")
+}
+
+func TestPaginatedFilterAvailableUpdatesSuccess(t *testing.T) {
+	checkPattern := `{"update_state": "%s", "active_partition": { "image": { "version": "%s"}}}`
+	expected := make([]instance, 0)
+	instances := make([]instance, 0)
+	getOut := &ssm.GetCommandInvocationOutput{
+		Status:                aws.String("Success"),
+		StandardOutputContent: aws.String(fmt.Sprintf(checkPattern, updateStateAvailable, "v1.0.5")),
+	}
+
+	for i := 0; i < 100; i++ { // 100 is chosen here to reprsent 2 full pages of SSM (limited to 50 per page)
+		containerID := "cont-inst-br" + strconv.Itoa(i)
+		ec2ID := "ec2-id-br" + strconv.Itoa(i)
+		instances = append(instances, instance{
+			instanceID:          ec2ID,
+			containerInstanceID: containerID,
+		})
+		expected = append(expected, instance{
+			instanceID:          ec2ID,
+			containerInstanceID: containerID,
+			bottlerocketVersion: "v1.0.5",
+		})
+	}
+
+	sendCommandCalls := 0
+	commandWaiterCalls := 0
+	getCommandInvocationCalls := 0
+	mockSSM := MockSSM{
+		GetCommandInvocationFn: func(input *ssm.GetCommandInvocationInput) (*ssm.GetCommandInvocationOutput, error) {
+			getCommandInvocationCalls++
+			return getOut, nil
+		},
+		SendCommandFn: func(input *ssm.SendCommandInput) (*ssm.SendCommandOutput, error) {
+			sendCommandCalls++
+			return &ssm.SendCommandOutput{
+				Command: &ssm.Command{
+					CommandId:    aws.String("command-id"),
+					DocumentName: aws.String("check-document"),
+				},
+			}, nil
+		},
+		WaitUntilCommandExecutedWithContextFn: func(ctx aws.Context, input *ssm.GetCommandInvocationInput, opts ...request.WaiterOption) error {
+			commandWaiterCalls++
+			assert.Equal(t, "command-id", aws.StringValue(input.CommandId))
+			return nil
+		},
+	}
+	u := updater{ssm: mockSSM}
+	actual, err := u.filterAvailableUpdates(instances)
+	require.NoError(t, err)
+	assert.EqualValues(t, expected, actual, "should contain all instances")
+	assert.Equal(t, 2, sendCommandCalls, "should send commands for each page")
+	assert.Equal(t, 100, commandWaiterCalls, "should wait for each instance")
+	assert.Equal(t, 100, getCommandInvocationCalls, "should collect output for each instance")
+}
+
+func TestPaginatedFilterAvailableUpdatesAllFail(t *testing.T) {
+	instances := make([]instance, 0)
+
+	for i := 0; i < 100; i++ {
+		containerID := "cont-inst-br" + strconv.Itoa(i)
+		ec2ID := "ec2-id-br" + strconv.Itoa(i)
+		instances = append(instances, instance{
+			instanceID:          ec2ID,
+			containerInstanceID: containerID,
+		})
+	}
+
+	sendCommandCalls := 0
+	mockSSM := MockSSM{
+		SendCommandFn: func(input *ssm.SendCommandInput) (*ssm.SendCommandOutput, error) {
+			sendCommandCalls++
+			return nil, errors.New("Failed to send document")
+		},
+	}
+	u := updater{ssm: mockSSM}
+	actual, err := u.filterAvailableUpdates(instances)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Failed to send document")
+	assert.Empty(t, actual)
+	assert.Equal(t, 2, sendCommandCalls, "should send commands for each page")
+}
+
+func TestPaginatedFilterAvailableUpdatesInPageFailures(t *testing.T) {
+	instances := make([]instance, 0)
+	checkPattern := `{"update_state": "%s", "active_partition": { "image": { "version": "%s"}}}`
+	for i := 0; i < 120; i++ { // 120 chosen here to ensure multiple pages are tested and that number instances divides by 3 evenly
+		containerID := "cont-inst-br" + strconv.Itoa(i)
+		ec2ID := "ec2-id-br" + strconv.Itoa(i)
+		instances = append(instances, instance{
+			instanceID:          ec2ID,
+			containerInstanceID: containerID,
+		})
+	}
+
+	sendCommandCalls := 0
+	commandWaiterCalls := 0
+	getCommandInvocationCalls := 0
+	count := 0
+	mockSSM := MockSSM{
+		GetCommandInvocationFn: func(input *ssm.GetCommandInvocationInput) (*ssm.GetCommandInvocationOutput, error) {
+			count++
+			getCommandInvocationCalls++
+			switch count % 3 {
+			case 0:
+				return nil, errors.New("Failed to get command output") // validate getCommandResult failure
+			case 1:
+				return &ssm.GetCommandInvocationOutput{
+					Status:                aws.String("Success"),
+					StandardOutputContent: aws.String("{}"),
+				}, nil // validates parseCommandOutput failure
+			case 2:
+				return &ssm.GetCommandInvocationOutput{
+					Status:                aws.String("Success"),
+					StandardOutputContent: aws.String(fmt.Sprintf(checkPattern, updateStateAvailable, "v1.0.5")),
+				}, nil // validate success case
+			}
+			return nil, nil
+		},
+		SendCommandFn: func(input *ssm.SendCommandInput) (*ssm.SendCommandOutput, error) {
+			sendCommandCalls++
+			return &ssm.SendCommandOutput{
+				Command: &ssm.Command{
+					CommandId:    aws.String("command-id"),
+					DocumentName: aws.String("check-document"),
+				},
+			}, nil
+		},
+		WaitUntilCommandExecutedWithContextFn: func(ctx aws.Context, input *ssm.GetCommandInvocationInput, opts ...request.WaiterOption) error {
+			assert.Equal(t, "command-id", aws.StringValue(input.CommandId))
+			commandWaiterCalls++
+			return nil
+		},
+	}
+	u := updater{ssm: mockSSM}
+	actual, err := u.filterAvailableUpdates(instances)
+	require.NoError(t, err)
+	assert.EqualValues(t, 40, len(actual), "Every 3rd instance of 120 should succeed")
+	assert.Equal(t, 3, sendCommandCalls, "should send commands for each page")
+	assert.Equal(t, 120, commandWaiterCalls, "should wait for each instance")
+	assert.Equal(t, 120, getCommandInvocationCalls, "should collect output for each instance")
+}
+
+func TestPaginatedFilterAvailableUpdatesSingleErr(t *testing.T) {
+	checkPattern := `{"update_state": "%s", "active_partition": { "image": { "version": "%s"}}}`
+	expected := make([]instance, 0)
+	instances := make([]instance, 0)
+	getOut := &ssm.GetCommandInvocationOutput{
+		Status:                aws.String("Success"),
+		StandardOutputContent: aws.String(fmt.Sprintf(checkPattern, updateStateAvailable, "v1.0.5")),
+	}
+
+	for i := 0; i < 100; i++ {
+		containerID := "cont-inst-br" + strconv.Itoa(i)
+		ec2ID := "ec2-id-br" + strconv.Itoa(i)
+		instances = append(instances, instance{
+			instanceID:          ec2ID,
+			containerInstanceID: containerID,
+		})
+		expected = append(expected, instance{
+			instanceID:          ec2ID,
+			containerInstanceID: containerID,
+			bottlerocketVersion: "v1.0.5",
+		})
+	}
+
+	pageErrors := []error{errors.New("Failed to send document"), nil}
+
+	sendCommandCalls := 0
+	commandWaiterCalls := 0
+	getCommandInvocationCalls := 0
+	callCount := 0
+	mockSSM := MockSSM{
+		GetCommandInvocationFn: func(input *ssm.GetCommandInvocationInput) (*ssm.GetCommandInvocationOutput, error) {
+			getCommandInvocationCalls++
+			return getOut, nil
+		},
+		SendCommandFn: func(input *ssm.SendCommandInput) (*ssm.SendCommandOutput, error) {
+			require.Less(t, callCount, len(pageErrors))
+			failErr := pageErrors[callCount]
+			callCount++
+			sendCommandCalls++
+			return &ssm.SendCommandOutput{
+				Command: &ssm.Command{
+					CommandId:    aws.String("command-id"),
+					DocumentName: aws.String("check-document"),
+				},
+			}, failErr
+		},
+		WaitUntilCommandExecutedWithContextFn: func(ctx aws.Context, input *ssm.GetCommandInvocationInput, opts ...request.WaiterOption) error {
+			assert.Equal(t, "command-id", aws.StringValue(input.CommandId))
+			commandWaiterCalls++
+			return nil
+		},
+	}
+	u := updater{ssm: mockSSM}
+	actual, err := u.filterAvailableUpdates(instances)
+
+	require.NoError(t, err)
+	assert.EqualValues(t, actual, expected[50:], "Should only contain instances from the 2nd page")
+	assert.Equal(t, 2, sendCommandCalls, "should send commands for each page")
+	assert.Equal(t, 50, commandWaiterCalls, "should wait for each instance")
+	assert.Equal(t, 50, getCommandInvocationCalls, "should collect output for each instance")
+}
+
 func TestGetCommandResult(t *testing.T) {
 	cases := []struct {
 		name            string
