@@ -1,3 +1,11 @@
+# 0.2.0
+
+* Add support for clusters larger than 50 container instances.
+* Add after-action summary and done message to log output.
+* Add check to reduce the chance of concurrent runs.
+
+Note: In the Bottlerocket ECS updater v0.1.0 release, support for clusters was limited to 50 container instances. In this release, clusters larger than 50 container instances are now supported. :tada: 
+
 # 0.1.0
 
 Initial release of the **Bottlerocket ECS updater** - A service to automatically manage Bottlerocket updates in an Amazon ECS cluster.
