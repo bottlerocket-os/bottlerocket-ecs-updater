@@ -152,9 +152,6 @@ A container instance may be skipped for update when:
   The Bottlerocket ECS Updater uses newer [`apiclient update` commands](https://github.com/bottlerocket-os/bottlerocket#update-api) that were added in version [1.0.5](https://github.com/bottlerocket-os/bottlerocket/blob/develop/CHANGELOG.md#v105-2021-01-15).
   The SSM commands will fail if your Bottlerocket OS version is less than 1.0.5.
   Instances running Bottlerocket versions less than 1.0.5 need to be manually updated.
-* _Too many instances are in the cluster._
-  The Bottlerocket ECS Updater currently supports clusters of up to 50 container instances.
-  If the updater is configured to target a cluster with more than 50 instances, some instances may not be updated.
 
 ### Why do new container instances launch with older Bottlerocket versions?
 
