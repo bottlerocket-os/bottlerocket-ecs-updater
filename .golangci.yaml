@@ -1,11 +1,9 @@
 linters:
   enable:
-    - structcheck
-    - varcheck
     - staticcheck
     - unconvert
     - goimports
-    - golint
+    - revive
     - ineffassign
     - vet
     - unused

@@ -1,3 +1,7 @@
+# 0.2.1
+
+* Bump version of Go to 1.19.1 and upgrade dependencies
+
 # 0.2.0
 
 * Add support for clusters larger than 50 container instances.
