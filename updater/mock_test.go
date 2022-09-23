@@ -20,6 +20,8 @@ type MockECS struct {
 var _ ECSAPI = (*MockECS)(nil)
 
 type MockSSM struct {
+	// WaitUntilCommandExecutedWithContextFn is executed concurrently through
+	// ECS code paths and tests should treat any data in a parallel safe manner
 	WaitUntilCommandExecutedWithContextFn func(ctx aws.Context, input *ssm.GetCommandInvocationInput, opts ...request.WaiterOption) error
 	SendCommandFn                         func(input *ssm.SendCommandInput) (*ssm.SendCommandOutput, error)
 	GetCommandInvocationFn                func(input *ssm.GetCommandInvocationInput) (*ssm.GetCommandInvocationOutput, error)

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"sync"
 	"testing"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -62,6 +63,10 @@ func TestFilterAvailableUpdates(t *testing.T) {
 		"inst-id-4": `{"update_state": "Staged", "active_partition": { "image": { "version": "v1.1.1"}}}`,
 		"inst-id-5": `{"update_state": "Available", "active_partition": { "image": { "version": "v1.0.5"}}}`,
 	}
+
+	// mutex needed to prevent race condition when incrementing counter in concurrent
+	// execution of WaitUntilCommandExecutedWithContextFn
+	var m sync.Mutex
 	sendCommandCalls := 0
 	commandWaiterCalls := 0
 	getCommandInvocationCalls := 0
@@ -83,7 +88,9 @@ func TestFilterAvailableUpdates(t *testing.T) {
 			}, nil
 		},
 		WaitUntilCommandExecutedWithContextFn: func(ctx aws.Context, input *ssm.GetCommandInvocationInput, opts ...request.WaiterOption) error {
+			m.Lock()
 			commandWaiterCalls++
+			m.Unlock()
 			assert.Equal(t, "command-id", aws.StringValue(input.CommandId))
 			return nil
 		},
@@ -120,6 +127,9 @@ func TestPaginatedFilterAvailableUpdatesSuccess(t *testing.T) {
 		})
 	}
 
+	// mutex needed to prevent race condition when incrementing counter in concurrent
+	// execution of WaitUntilCommandExecutedWithContextFn
+	var m sync.Mutex
 	sendCommandCalls := 0
 	commandWaiterCalls := 0
 	getCommandInvocationCalls := 0
@@ -138,7 +148,9 @@ func TestPaginatedFilterAvailableUpdatesSuccess(t *testing.T) {
 			}, nil
 		},
 		WaitUntilCommandExecutedWithContextFn: func(ctx aws.Context, input *ssm.GetCommandInvocationInput, opts ...request.WaiterOption) error {
+			m.Lock()
 			commandWaiterCalls++
+			m.Unlock()
 			assert.Equal(t, "command-id", aws.StringValue(input.CommandId))
 			return nil
 		},
@@ -191,6 +203,9 @@ func TestPaginatedFilterAvailableUpdatesInPageFailures(t *testing.T) {
 		})
 	}
 
+	// mutex needed to prevent race condition when incrementing counter in concurrent
+	// execution of WaitUntilCommandExecutedWithContextFn
+	var m sync.Mutex
 	sendCommandCalls := 0
 	commandWaiterCalls := 0
 	getCommandInvocationCalls := 0
@@ -226,7 +241,9 @@ func TestPaginatedFilterAvailableUpdatesInPageFailures(t *testing.T) {
 		},
 		WaitUntilCommandExecutedWithContextFn: func(ctx aws.Context, input *ssm.GetCommandInvocationInput, opts ...request.WaiterOption) error {
 			assert.Equal(t, "command-id", aws.StringValue(input.CommandId))
+			m.Lock()
 			commandWaiterCalls++
+			m.Unlock()
 			return nil
 		},
 	}
@@ -264,6 +281,9 @@ func TestPaginatedFilterAvailableUpdatesSingleErr(t *testing.T) {
 
 	pageErrors := []error{errors.New("Failed to send document"), nil}
 
+	// mutex needed to prevent race condition when incrementing counter in concurrent
+	// execution of WaitUntilCommandExecutedWithContextFn
+	var m sync.Mutex
 	sendCommandCalls := 0
 	commandWaiterCalls := 0
 	getCommandInvocationCalls := 0
@@ -287,7 +307,9 @@ func TestPaginatedFilterAvailableUpdatesSingleErr(t *testing.T) {
 		},
 		WaitUntilCommandExecutedWithContextFn: func(ctx aws.Context, input *ssm.GetCommandInvocationInput, opts ...request.WaiterOption) error {
 			assert.Equal(t, "command-id", aws.StringValue(input.CommandId))
+			m.Lock()
 			commandWaiterCalls++
+			m.Unlock()
 			return nil
 		},
 	}
@@ -358,6 +380,9 @@ func TestGetCommandResult(t *testing.T) {
 
 func TestSendCommandSuccess(t *testing.T) {
 	instances := []string{"inst-id-1", "inst-id-2"}
+	// mutex needed to prevent race condition when appending to instances slice in concurrent
+	// execution of WaitUntilCommandExecutedWithContextFn
+	var m sync.Mutex
 	waitInstanceIDs := []string{}
 	mockSSM := MockSSM{
 		SendCommandFn: func(input *ssm.SendCommandInput) (*ssm.SendCommandOutput, error) {
@@ -368,7 +393,9 @@ func TestSendCommandSuccess(t *testing.T) {
 		},
 		WaitUntilCommandExecutedWithContextFn: func(ctx aws.Context, input *ssm.GetCommandInvocationInput, opts ...request.WaiterOption) error {
 			assert.Equal(t, "command-id", aws.StringValue(input.CommandId))
+			m.Lock()
 			waitInstanceIDs = append(waitInstanceIDs, aws.StringValue(input.InstanceId))
+			m.Unlock()
 			return nil
 		},
 	}
@@ -479,12 +506,17 @@ func TestSendCommandWaitSuccess(t *testing.T) {
 	})
 	t.Run("wait all success", func(t *testing.T) {
 		instances := []string{"inst-id-1", "inst-id-2"}
+		// mutex needed to prevent race condition when appending to instances slice in concurrent
+		// execution of WaitUntilCommandExecutedWithContextFn
+		var m sync.Mutex
 		waitInstanceIDs := []string{}
 		mockSSM := MockSSM{
 			SendCommandFn: mockSendCommand,
 			WaitUntilCommandExecutedWithContextFn: func(ctx aws.Context, input *ssm.GetCommandInvocationInput, opts ...request.WaiterOption) error {
 				assert.Equal(t, "command-id", aws.StringValue(input.CommandId))
+				m.Lock()
 				waitInstanceIDs = append(waitInstanceIDs, aws.StringValue(input.InstanceId))
+				m.Unlock()
 				return nil
 			},
 		}
