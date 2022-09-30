@@ -13,9 +13,8 @@ ENV GOPROXY=direct
 # Sets the target architecture for the binary
 ARG GOARCH
 ENV OUTPUT_DIR=/wrkdir/target/${GOARCH}/release
-COPY updater/go.mod updater/go.sum /wrkdir/
-RUN go mod download
 COPY ./updater /wrkdir/
+RUN go mod download
 RUN CGO_ENABLED=0 go build -v -o ${OUTPUT_DIR}/bottlerocket-ecs-updater . && \
     cp ${OUTPUT_DIR}/bottlerocket-ecs-updater /wrkdir/bottlerocket-ecs-updater
 

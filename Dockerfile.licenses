@@ -12,7 +12,7 @@ ARG SDK_IMAGE
 # GOLANG_IMAGE is the image to be used for collecting modules. This should be
 # the same image used in the build. The idea is to have the same toolchain to
 # avoid running into any differences between versions.
-ARG GOLANG_IMAGE=golang:1.16.3
+ARG GOLANG_IMAGE=golang:1.19.1
 
 # Fetch dependencies into a vendor/ directory.
 #
@@ -24,10 +24,9 @@ WORKDIR /wrkdir
 ENV GOPROXY=direct
 # Sets the target architecture for the binary
 ARG GOARCH
-COPY updater/go.mod updater/go.sum /wrkdir/
+COPY ./updater /wrkdir/
 RUN go mod download
 # Unpack go modules into a vendor/ directory to run scanner on.
-COPY ./updater /wrkdir/
 RUN go mod vendor
 
 # Run the license scanner and dump its processed & collected license data to be
