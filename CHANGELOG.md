@@ -1,3 +1,9 @@
+# 0.2.2
+
+* Bump version of Go to 1.19.2
+* Upgrade `github.com/aws/aws-sdk-go` dependency to `v1.44.137`
+* Upgrade `github.com/stretchr/testify` dependency to `v1.8.1`
+
 # 0.2.1
 
 * Bump version of Go to 1.19.1 and upgrade dependencies
