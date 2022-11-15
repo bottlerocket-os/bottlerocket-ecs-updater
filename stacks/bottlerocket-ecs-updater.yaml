@@ -10,7 +10,7 @@ Parameters:
   UpdaterImage:
     Description: 'Bottlerocket updater container image'
     Type: String
-    Default: 'public.ecr.aws/bottlerocket/bottlerocket-ecs-updater:v0.2.1'
+    Default: 'public.ecr.aws/bottlerocket/bottlerocket-ecs-updater:v0.2.2'
   LogGroupName:
     Description: 'Log group name for Bottlerocket updater logs'
     Type: String
