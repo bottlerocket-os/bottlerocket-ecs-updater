@@ -163,6 +163,20 @@ Note: We do not recommend using the Bottlerocket ECS Updater in conjunction with
 The ECS Updater is designed to keep services safe from interruption by updating one instance at a time.
 With the short average lifetime of Spot instances, the updater may not update them until relatively late in their life, meaning they may not be up to date when serving your application.
 
+## Developer guide
+
+To get started with building and developing the ECS updater, make sure you have:
+
+* [Go installed](https://go.dev/doc/install)
+* [`golangci-lint` installed locally](https://golangci-lint.run/usage/install/#local-installation)
+* make
+* [amazon-ecr-credential-helper](https://github.com/awslabs/amazon-ecr-credential-helper) setup for Docker and access to ECR (or your preferred image registry)
+* And the [cloud formation template linter installed](https://github.com/aws-cloudformation/cfn-lint)
+
+Make sure everything is ready and installed by running the tests with `make test`.
+Ensure the local builds work by running `make`.
+You might first need to get the modules downloaded to your local go mod cache by running `make tidy`.
+
 ## Security
 
 See [CONTRIBUTING](CONTRIBUTING.md#security-issue-notifications) for more information.
