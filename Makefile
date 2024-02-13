@@ -1,7 +1,7 @@
 # SHELL is set as bash to use some bashisms.
 SHELL = bash
 
-BOTTLEROCKET_SDK_VERSION = v0.33.0
+BOTTLEROCKET_SDK_VERSION = v0.37.0
 BOTTLEROCKET_SDK_ARCH    = x86_64
 UPDATER_TARGET_ARCH      = amd64
 
