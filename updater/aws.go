@@ -85,7 +85,7 @@ func (u *updater) listContainerInstances() ([]*string, error) {
 		Cluster: &u.cluster,
 		Status:  aws.String(ecs.ContainerInstanceStatusActive),
 	}
-	if err := u.ecs.ListContainerInstancesPages(input, func(output *ecs.ListContainerInstancesOutput, lastpage bool) bool {
+	if err := u.ecs.ListContainerInstancesPages(input, func(output *ecs.ListContainerInstancesOutput, _ bool) bool {
 		containerInstances = append(containerInstances, output.ContainerInstanceArns...)
 		return true
 	}); err != nil {
@@ -412,9 +412,8 @@ func (u *updater) verifyUpdate(inst instance) (bool, error) {
 		log.Printf("Container instance %q was updated to version %q successfully, however another newer version was recently released;"+
 			" Instance will be updated to newer version in next iteration.", inst.containerInstanceID, updatedVersion)
 		return true, nil
-	} else {
-		log.Printf("Container instance %q updated to version %q", inst.containerInstanceID, updatedVersion)
 	}
+	log.Printf("Container instance %q updated to version %q", inst.containerInstanceID, updatedVersion)
 	return true, nil
 }
 
