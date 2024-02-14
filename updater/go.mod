@@ -3,7 +3,7 @@ module github.com/bottlerocket-os/bottlerocket-ecs-updater
 go 1.19
 
 require (
-	github.com/aws/aws-sdk-go v1.44.217
+	github.com/aws/aws-sdk-go v1.50.17
 	github.com/stretchr/testify v1.8.1
 )
 

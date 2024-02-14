@@ -78,7 +78,7 @@ func TestFilterAvailableUpdates(t *testing.T) {
 				StandardOutputContent: aws.String(responses[*input.InstanceId]),
 			}, nil
 		},
-		SendCommandFn: func(input *ssm.SendCommandInput) (*ssm.SendCommandOutput, error) {
+		SendCommandFn: func(_ *ssm.SendCommandInput) (*ssm.SendCommandOutput, error) {
 			sendCommandCalls++
 			return &ssm.SendCommandOutput{
 				Command: &ssm.Command{
@@ -87,7 +87,7 @@ func TestFilterAvailableUpdates(t *testing.T) {
 				},
 			}, nil
 		},
-		WaitUntilCommandExecutedWithContextFn: func(ctx aws.Context, input *ssm.GetCommandInvocationInput, opts ...request.WaiterOption) error {
+		WaitUntilCommandExecutedWithContextFn: func(_ aws.Context, input *ssm.GetCommandInvocationInput, _ ...request.WaiterOption) error {
 			m.Lock()
 			commandWaiterCalls++
 			m.Unlock()
@@ -134,11 +134,11 @@ func TestPaginatedFilterAvailableUpdatesSuccess(t *testing.T) {
 	commandWaiterCalls := 0
 	getCommandInvocationCalls := 0
 	mockSSM := MockSSM{
-		GetCommandInvocationFn: func(input *ssm.GetCommandInvocationInput) (*ssm.GetCommandInvocationOutput, error) {
+		GetCommandInvocationFn: func(_ *ssm.GetCommandInvocationInput) (*ssm.GetCommandInvocationOutput, error) {
 			getCommandInvocationCalls++
 			return getOut, nil
 		},
-		SendCommandFn: func(input *ssm.SendCommandInput) (*ssm.SendCommandOutput, error) {
+		SendCommandFn: func(_ *ssm.SendCommandInput) (*ssm.SendCommandOutput, error) {
 			sendCommandCalls++
 			return &ssm.SendCommandOutput{
 				Command: &ssm.Command{
@@ -147,7 +147,7 @@ func TestPaginatedFilterAvailableUpdatesSuccess(t *testing.T) {
 				},
 			}, nil
 		},
-		WaitUntilCommandExecutedWithContextFn: func(ctx aws.Context, input *ssm.GetCommandInvocationInput, opts ...request.WaiterOption) error {
+		WaitUntilCommandExecutedWithContextFn: func(_ aws.Context, input *ssm.GetCommandInvocationInput, _ ...request.WaiterOption) error {
 			m.Lock()
 			commandWaiterCalls++
 			m.Unlock()
@@ -178,7 +178,7 @@ func TestPaginatedFilterAvailableUpdatesAllFail(t *testing.T) {
 
 	sendCommandCalls := 0
 	mockSSM := MockSSM{
-		SendCommandFn: func(input *ssm.SendCommandInput) (*ssm.SendCommandOutput, error) {
+		SendCommandFn: func(_ *ssm.SendCommandInput) (*ssm.SendCommandOutput, error) {
 			sendCommandCalls++
 			return nil, errors.New("Failed to send document")
 		},
@@ -211,7 +211,7 @@ func TestPaginatedFilterAvailableUpdatesInPageFailures(t *testing.T) {
 	getCommandInvocationCalls := 0
 	count := 0
 	mockSSM := MockSSM{
-		GetCommandInvocationFn: func(input *ssm.GetCommandInvocationInput) (*ssm.GetCommandInvocationOutput, error) {
+		GetCommandInvocationFn: func(_ *ssm.GetCommandInvocationInput) (*ssm.GetCommandInvocationOutput, error) {
 			count++
 			getCommandInvocationCalls++
 			switch count % 3 {
@@ -230,7 +230,7 @@ func TestPaginatedFilterAvailableUpdatesInPageFailures(t *testing.T) {
 			}
 			return nil, nil
 		},
-		SendCommandFn: func(input *ssm.SendCommandInput) (*ssm.SendCommandOutput, error) {
+		SendCommandFn: func(_ *ssm.SendCommandInput) (*ssm.SendCommandOutput, error) {
 			sendCommandCalls++
 			return &ssm.SendCommandOutput{
 				Command: &ssm.Command{
@@ -239,7 +239,7 @@ func TestPaginatedFilterAvailableUpdatesInPageFailures(t *testing.T) {
 				},
 			}, nil
 		},
-		WaitUntilCommandExecutedWithContextFn: func(ctx aws.Context, input *ssm.GetCommandInvocationInput, opts ...request.WaiterOption) error {
+		WaitUntilCommandExecutedWithContextFn: func(_ aws.Context, input *ssm.GetCommandInvocationInput, _ ...request.WaiterOption) error {
 			assert.Equal(t, "command-id", aws.StringValue(input.CommandId))
 			m.Lock()
 			commandWaiterCalls++
@@ -289,11 +289,11 @@ func TestPaginatedFilterAvailableUpdatesSingleErr(t *testing.T) {
 	getCommandInvocationCalls := 0
 	callCount := 0
 	mockSSM := MockSSM{
-		GetCommandInvocationFn: func(input *ssm.GetCommandInvocationInput) (*ssm.GetCommandInvocationOutput, error) {
+		GetCommandInvocationFn: func(_ *ssm.GetCommandInvocationInput) (*ssm.GetCommandInvocationOutput, error) {
 			getCommandInvocationCalls++
 			return getOut, nil
 		},
-		SendCommandFn: func(input *ssm.SendCommandInput) (*ssm.SendCommandOutput, error) {
+		SendCommandFn: func(_ *ssm.SendCommandInput) (*ssm.SendCommandOutput, error) {
 			require.Less(t, callCount, len(pageErrors))
 			failErr := pageErrors[callCount]
 			callCount++
@@ -305,7 +305,7 @@ func TestPaginatedFilterAvailableUpdatesSingleErr(t *testing.T) {
 				},
 			}, failErr
 		},
-		WaitUntilCommandExecutedWithContextFn: func(ctx aws.Context, input *ssm.GetCommandInvocationInput, opts ...request.WaiterOption) error {
+		WaitUntilCommandExecutedWithContextFn: func(_ aws.Context, input *ssm.GetCommandInvocationInput, _ ...request.WaiterOption) error {
 			assert.Equal(t, "command-id", aws.StringValue(input.CommandId))
 			m.Lock()
 			commandWaiterCalls++
@@ -391,7 +391,7 @@ func TestSendCommandSuccess(t *testing.T) {
 			assert.Equal(t, aws.StringSlice(instances), input.InstanceIds)
 			return &ssm.SendCommandOutput{Command: &ssm.Command{CommandId: aws.String("command-id")}}, nil
 		},
-		WaitUntilCommandExecutedWithContextFn: func(ctx aws.Context, input *ssm.GetCommandInvocationInput, opts ...request.WaiterOption) error {
+		WaitUntilCommandExecutedWithContextFn: func(_ aws.Context, input *ssm.GetCommandInvocationInput, _ ...request.WaiterOption) error {
 			assert.Equal(t, "command-id", aws.StringValue(input.CommandId))
 			m.Lock()
 			waitInstanceIDs = append(waitInstanceIDs, aws.StringValue(input.InstanceId))
@@ -451,7 +451,7 @@ func TestSendCommandWaitErr(t *testing.T) {
 						Command: &ssm.Command{CommandId: aws.String("command-id")},
 					}, nil
 				},
-				WaitUntilCommandExecutedWithContextFn: func(ctx aws.Context, input *ssm.GetCommandInvocationInput, opts ...request.WaiterOption) error {
+				WaitUntilCommandExecutedWithContextFn: func(_ aws.Context, input *ssm.GetCommandInvocationInput, _ ...request.WaiterOption) error {
 					assert.Equal(t, "command-id", aws.StringValue(input.CommandId))
 					return waitError
 				},
@@ -486,7 +486,7 @@ func TestSendCommandWaitSuccess(t *testing.T) {
 		failedInstanceIDs := []string{}
 		mockSSM := MockSSM{
 			SendCommandFn: mockSendCommand,
-			WaitUntilCommandExecutedWithContextFn: func(ctx aws.Context, input *ssm.GetCommandInvocationInput, opts ...request.WaiterOption) error {
+			WaitUntilCommandExecutedWithContextFn: func(_ aws.Context, input *ssm.GetCommandInvocationInput, _ ...request.WaiterOption) error {
 				if aws.StringValue(input.InstanceId) == commandSuccessInstance {
 					return nil
 				}
@@ -512,7 +512,7 @@ func TestSendCommandWaitSuccess(t *testing.T) {
 		waitInstanceIDs := []string{}
 		mockSSM := MockSSM{
 			SendCommandFn: mockSendCommand,
-			WaitUntilCommandExecutedWithContextFn: func(ctx aws.Context, input *ssm.GetCommandInvocationInput, opts ...request.WaiterOption) error {
+			WaitUntilCommandExecutedWithContextFn: func(_ aws.Context, input *ssm.GetCommandInvocationInput, _ ...request.WaiterOption) error {
 				assert.Equal(t, "command-id", aws.StringValue(input.CommandId))
 				m.Lock()
 				waitInstanceIDs = append(waitInstanceIDs, aws.StringValue(input.InstanceId))
@@ -1040,7 +1040,7 @@ func TestDrainInstance(t *testing.T) {
 		mockECS := MockECS{
 			UpdateContainerInstancesStateFn: mockStateChange,
 			ListTasksFn:                     mockListTasks,
-			WaitUntilTasksStoppedWithContextFn: func(ctx aws.Context, input *ecs.DescribeTasksInput, opts ...request.WaiterOption) error {
+			WaitUntilTasksStoppedWithContextFn: func(_ aws.Context, input *ecs.DescribeTasksInput, _ ...request.WaiterOption) error {
 				assert.Equal(t, []*string{
 					aws.String("task-arn-1"),
 				}, input.Tasks)
@@ -1120,7 +1120,7 @@ func TestDrainInstance(t *testing.T) {
 		mockECS := MockECS{
 			UpdateContainerInstancesStateFn: mockStateChange,
 			ListTasksFn:                     mockListTasks,
-			WaitUntilTasksStoppedWithContextFn: func(ctx aws.Context, input *ecs.DescribeTasksInput, opts ...request.WaiterOption) error {
+			WaitUntilTasksStoppedWithContextFn: func(_ aws.Context, input *ecs.DescribeTasksInput, _ ...request.WaiterOption) error {
 				assert.Equal(t, []*string{
 					aws.String("task-arn-1"),
 				}, input.Tasks)
@@ -1193,7 +1193,7 @@ func TestUpdateInstance(t *testing.T) {
 					assert.Equal(t, "instance-id", aws.StringValue(input.InstanceId))
 					return tc.invocationOut, nil
 				},
-				WaitUntilCommandExecutedWithContextFn: func(ctx aws.Context, input *ssm.GetCommandInvocationInput, opts ...request.WaiterOption) error {
+				WaitUntilCommandExecutedWithContextFn: func(_ aws.Context, input *ssm.GetCommandInvocationInput, _ ...request.WaiterOption) error {
 					assert.Equal(t, "command-id", aws.StringValue(input.CommandId))
 					assert.Equal(t, "instance-id", aws.StringValue(input.InstanceId))
 					return nil
@@ -1240,7 +1240,7 @@ func TestUpdateInstanceErr(t *testing.T) {
 			StandardOutputContent: aws.String("{\"update_state\": \"Available\", \"active_partition\": { \"image\": { \"version\": \"0.0.0\"}}}"),
 		}, nil
 	}
-	mockWaitCommandExecution := func(ctx aws.Context, input *ssm.GetCommandInvocationInput, opts ...request.WaiterOption) error {
+	mockWaitCommandExecution := func(_ aws.Context, input *ssm.GetCommandInvocationInput, _ ...request.WaiterOption) error {
 		assert.Equal(t, "command-id", aws.StringValue(input.CommandId))
 		assert.Equal(t, "instance-id", aws.StringValue(input.InstanceId))
 		return nil
@@ -1328,7 +1328,7 @@ func TestUpdateInstanceErr(t *testing.T) {
 		waitExecErr := errors.New("failed to wait ssm execution complete")
 		mockSSM := MockSSM{
 			SendCommandFn: mockSendCommand,
-			WaitUntilCommandExecutedWithContextFn: func(ctx aws.Context, input *ssm.GetCommandInvocationInput, opts ...request.WaiterOption) error {
+			WaitUntilCommandExecutedWithContextFn: func(_ aws.Context, input *ssm.GetCommandInvocationInput, _ ...request.WaiterOption) error {
 				assert.Equal(t, "command-id", aws.StringValue(input.CommandId))
 				assert.Equal(t, "instance-id", aws.StringValue(input.InstanceId))
 				return waitExecErr
@@ -1420,7 +1420,7 @@ func TestVerifyUpdate(t *testing.T) {
 					assert.Equal(t, "instance-id", aws.StringValue(input.InstanceId))
 					return tc.invocationOut, nil
 				},
-				WaitUntilCommandExecutedWithContextFn: func(ctx aws.Context, input *ssm.GetCommandInvocationInput, opts ...request.WaiterOption) error {
+				WaitUntilCommandExecutedWithContextFn: func(_ aws.Context, input *ssm.GetCommandInvocationInput, _ ...request.WaiterOption) error {
 					assert.Equal(t, "command-id", aws.StringValue(input.CommandId))
 					assert.Equal(t, "instance-id", aws.StringValue(input.InstanceId))
 					return nil
@@ -1449,7 +1449,7 @@ func TestVerifyUpdateErr(t *testing.T) {
 			},
 		}, nil
 	}
-	mockWaitCommandExecution := func(ctx aws.Context, input *ssm.GetCommandInvocationInput, opts ...request.WaiterOption) error {
+	mockWaitCommandExecution := func(_ aws.Context, input *ssm.GetCommandInvocationInput, _ ...request.WaiterOption) error {
 		assert.Equal(t, "command-id", aws.StringValue(input.CommandId))
 		assert.Equal(t, "instance-id", aws.StringValue(input.InstanceId))
 		return nil
@@ -1485,7 +1485,7 @@ func TestVerifyUpdateErr(t *testing.T) {
 		waitExecErr := errors.New("failed to wait ssm execution complete")
 		mockSSM := MockSSM{
 			SendCommandFn: mockSSMCommandOut,
-			WaitUntilCommandExecutedWithContextFn: func(ctx aws.Context, input *ssm.GetCommandInvocationInput, opts ...request.WaiterOption) error {
+			WaitUntilCommandExecutedWithContextFn: func(_ aws.Context, input *ssm.GetCommandInvocationInput, _ ...request.WaiterOption) error {
 				assert.Equal(t, "command-id", aws.StringValue(input.CommandId))
 				assert.Equal(t, "instance-id", aws.StringValue(input.InstanceId))
 				return waitExecErr
@@ -1586,7 +1586,7 @@ func TestActivateInstance(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			mockECS := MockECS{
-				UpdateContainerInstancesStateFn: func(input *ecs.UpdateContainerInstancesStateInput) (*ecs.UpdateContainerInstancesStateOutput, error) {
+				UpdateContainerInstancesStateFn: func(_ *ecs.UpdateContainerInstancesStateInput) (*ecs.UpdateContainerInstancesStateOutput, error) {
 					return tc.stateOut, tc.stateErr
 				},
 			}
@@ -1639,7 +1639,7 @@ func TestAlreadyRunning(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			mockECS := MockECS{
-				ListTasksFn: func(input *ecs.ListTasksInput) (*ecs.ListTasksOutput, error) {
+				ListTasksFn: func(_ *ecs.ListTasksInput) (*ecs.ListTasksOutput, error) {
 					return tc.listOut, tc.listErr
 				},
 			}
