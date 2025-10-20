@@ -8,6 +8,10 @@ on:
     paths:
       - 'stacks/*'
       - 'integ/stacks/*'
+
+permissions:
+  contents: read
+
 jobs:
   cfn-lint:
     runs-on: ubuntu-latest
